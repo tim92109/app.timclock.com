@@ -1,0 +1,4 @@
+AuthName "app.timclock.com statistics"
+AuthType Basic
+AuthUserFile /home/timclock/domains/app.timclock.com/.awstats-htpasswd
+require valid-user
