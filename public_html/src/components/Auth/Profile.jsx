@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { User, Lock, Save, Eye, EyeOff } from 'lucide-react';
-import { useAuth } from '../../hooks/useAuth';
+import { useAuth } from '../../hooks/useAuth.jsx';
+import { useSettings } from '../../hooks/useSettings.jsx';
 import { isValidEmail } from '../../utils/helpers';
 import { ROLE_CONFIG } from '../../utils/constants';
 import LoadingSpinner from '../Common/LoadingSpinner';
@@ -10,13 +11,14 @@ const Profile = () => {
   const [activeTab, setActiveTab] = useState('profile');
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
-  const { 
+  const {
     user, 
     updateProfile, 
     changePassword, 
     isUpdateProfileLoading, 
     isChangePasswordLoading 
   } = useAuth();
+  const { t } = useSettings();
 
   const {
     register: registerProfile,
@@ -28,6 +30,7 @@ const Profile = () => {
       first_name: user?.first_name || '',
       last_name: user?.last_name || '',
       email: user?.email || '',
+      phone: user?.phone || '',
       hourly_rate: user?.hourly_rate || '',
     },
   });
@@ -66,11 +69,11 @@ const Profile = () => {
   const roleConfig = ROLE_CONFIG[user?.role] || ROLE_CONFIG.employee;
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="w-full">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Profile Settings</h1>
+        <h1 className="text-3xl font-bold text-gray-900">{t('auth.profile.title')}</h1>
         <p className="mt-2 text-gray-600">
-          Manage your account settings and preferences
+          {t('auth.profile.subtitle')}
         </p>
       </div>
 
@@ -87,7 +90,7 @@ const Profile = () => {
               }`}
             >
               <User className="w-5 h-5 inline mr-2" />
-              Profile Information
+              {t('auth.profile.tabProfile')}
             </button>
             <button
               onClick={() => setActiveTab('password')}
@@ -98,7 +101,7 @@ const Profile = () => {
               }`}
             >
               <Lock className="w-5 h-5 inline mr-2" />
-              Change Password
+              {t('auth.profile.tabPassword')}
             </button>
           </nav>
         </div>
@@ -108,9 +111,9 @@ const Profile = () => {
           {activeTab === 'profile' && (
             <div>
               <div className="mb-6">
-                <h3 className="text-lg font-medium text-gray-900">Profile Information</h3>
+                <h3 className="text-lg font-medium text-gray-900">{t('auth.profile.infoHeading')}</h3>
                 <p className="mt-1 text-sm text-gray-600">
-                  Update your personal information and account details.
+                  {t('auth.profile.infoDescription')}
                 </p>
               </div>
 
@@ -138,14 +141,14 @@ const Profile = () => {
                 <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
                   <div>
                     <label htmlFor="first_name" className="block text-sm font-medium text-gray-700">
-                      First Name
+                      {t('auth.profile.firstNameLabel')}
                     </label>
                     <input
                       {...registerProfile('first_name', {
-                        required: 'First name is required',
+                        required: t('auth.profile.firstNameRequired'),
                         minLength: {
                           value: 2,
-                          message: 'First name must be at least 2 characters',
+                          message: t('auth.profile.firstNameMin'),
                         },
                       })}
                       type="text"
@@ -158,14 +161,14 @@ const Profile = () => {
 
                   <div>
                     <label htmlFor="last_name" className="block text-sm font-medium text-gray-700">
-                      Last Name
+                      {t('auth.profile.lastNameLabel')}
                     </label>
                     <input
                       {...registerProfile('last_name', {
-                        required: 'Last name is required',
+                        required: t('auth.profile.lastNameRequired'),
                         minLength: {
                           value: 2,
-                          message: 'Last name must be at least 2 characters',
+                          message: t('auth.profile.lastNameMin'),
                         },
                       })}
                       type="text"
@@ -179,12 +182,12 @@ const Profile = () => {
 
                 <div>
                   <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-                    Email Address
+                    {t('auth.profile.emailLabel')}
                   </label>
                   <input
                     {...registerProfile('email', {
-                      required: 'Email is required',
-                      validate: (value) => isValidEmail(value) || 'Please enter a valid email address',
+                      required: t('auth.profile.emailRequired'),
+                      validate: (value) => isValidEmail(value) || t('auth.profile.emailInvalid'),
                     })}
                     type="email"
                     className={`input mt-1 ${profileErrors.email ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : ''}`}
@@ -195,14 +198,29 @@ const Profile = () => {
                 </div>
 
                 <div>
+                  <label htmlFor="phone" className="block text-sm font-medium text-gray-700">
+                    {t('auth.profile.phoneLabel')}
+                  </label>
+                  <input
+                    {...registerProfile('phone')}
+                    type="tel"
+                    className={`input mt-1 ${profileErrors.phone ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : ''}`}
+                    placeholder={t('auth.profile.phonePlaceholder')}
+                  />
+                  {profileErrors.phone && (
+                    <p className="mt-1 text-sm text-red-600">{profileErrors.phone.message}</p>
+                  )}
+                </div>
+
+                <div>
                   <label htmlFor="hourly_rate" className="block text-sm font-medium text-gray-700">
-                    Hourly Rate
+                    {t('auth.profile.hourlyRateLabel')}
                   </label>
                   <input
                     {...registerProfile('hourly_rate', {
                       min: {
                         value: 0,
-                        message: 'Hourly rate must be positive',
+                        message: t('auth.profile.hourlyRateMin'),
                       },
                     })}
                     type="number"
@@ -225,7 +243,7 @@ const Profile = () => {
                     ) : (
                       <>
                         <Save className="w-4 h-4 mr-2" />
-                        Save Changes
+                        {t('auth.profile.save')}
                       </>
                     )}
                   </button>
@@ -237,21 +255,21 @@ const Profile = () => {
           {activeTab === 'password' && (
             <div>
               <div className="mb-6">
-                <h3 className="text-lg font-medium text-gray-900">Change Password</h3>
+                <h3 className="text-lg font-medium text-gray-900">{t('auth.profile.changePasswordHeading')}</h3>
                 <p className="mt-1 text-sm text-gray-600">
-                  Update your password to keep your account secure.
+                  {t('auth.profile.changePasswordDescription')}
                 </p>
               </div>
 
               <form onSubmit={handlePasswordSubmit(onPasswordSubmit)} className="space-y-6">
                 <div>
                   <label htmlFor="currentPassword" className="block text-sm font-medium text-gray-700">
-                    Current Password
+                    {t('auth.profile.currentPasswordLabel')}
                   </label>
                   <div className="mt-1 relative">
                     <input
                       {...registerPassword('currentPassword', {
-                        required: 'Current password is required',
+                        required: t('auth.profile.currentPasswordRequired'),
                       })}
                       type={showCurrentPassword ? 'text' : 'password'}
                       className={`input pr-10 ${passwordErrors.currentPassword ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : ''}`}
@@ -275,15 +293,15 @@ const Profile = () => {
 
                 <div>
                   <label htmlFor="newPassword" className="block text-sm font-medium text-gray-700">
-                    New Password
+                    {t('auth.profile.newPasswordLabel')}
                   </label>
                   <div className="mt-1 relative">
                     <input
                       {...registerPassword('newPassword', {
-                        required: 'New password is required',
+                        required: t('auth.profile.newPasswordRequired'),
                         minLength: {
                           value: 6,
-                          message: 'Password must be at least 6 characters',
+                          message: t('auth.profile.newPasswordMin'),
                         },
                       })}
                       type={showNewPassword ? 'text' : 'password'}
@@ -308,12 +326,12 @@ const Profile = () => {
 
                 <div>
                   <label htmlFor="confirmNewPassword" className="block text-sm font-medium text-gray-700">
-                    Confirm New Password
+                    {t('auth.profile.confirmNewPasswordLabel')}
                   </label>
                   <input
                     {...registerPassword('confirmNewPassword', {
-                      required: 'Please confirm your new password',
-                      validate: (value) => value === newPassword || 'Passwords do not match',
+                      required: t('auth.profile.confirmNewPasswordRequired'),
+                      validate: (value) => value === newPassword || t('auth.profile.passwordMismatch'),
                     })}
                     type="password"
                     className={`input mt-1 ${passwordErrors.confirmNewPassword ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : ''}`}
@@ -334,7 +352,7 @@ const Profile = () => {
                     ) : (
                       <>
                         <Lock className="w-4 h-4 mr-2" />
-                        Change Password
+                        {t('auth.profile.changePassword')}
                       </>
                     )}
                   </button>

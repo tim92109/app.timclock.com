@@ -29,10 +29,10 @@ router.get('/:id', clientController.getClientById);
 /**
  * @route   POST /api/clients
  * @desc    Create new client
- * @access  Private (Admin, Manager only)
+ * @access  Private (Admin, Manager, Contractor)
  */
 router.post('/', 
-  authorize(['admin', 'manager']), 
+  authorize(['admin', 'manager', 'contractor']), 
   validateClient, 
   clientController.createClient
 );
@@ -40,10 +40,10 @@ router.post('/',
 /**
  * @route   PUT /api/clients/:id
  * @desc    Update client
- * @access  Private (Admin, Manager only)
+ * @access  Private (Admin, Manager, Contractor)
  */
 router.put('/:id', 
-  authorize(['admin', 'manager']), 
+  authorize(['admin', 'manager', 'contractor']), 
   validateClientUpdate, 
   clientController.updateClient
 );
@@ -68,10 +68,10 @@ router.get('/:id/projects', clientController.getClientProjects);
 /**
  * @route   GET /api/clients/:id/stats
  * @desc    Get client statistics
- * @access  Private (Admin, Manager only)
+ * @access  Private (Admin, Manager, Contractor)
  */
 router.get('/:id/stats', 
-  authorize(['admin', 'manager']), 
+  authorize(['admin', 'manager', 'contractor']), 
   clientController.getClientStats
 );
 

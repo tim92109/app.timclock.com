@@ -23,10 +23,11 @@ const {
   parsePagination, 
   buildPaginatedResponse,
   formatDate,
-  calculateDuration,
   validateTimeRange,
   timeRangesOverlap,
-  calculateBillableAmount 
+  calculateBillableAmount,
+  employeeProjectAccess,
+  pushEmployeeProjectAccessParams
 } = require('../utils/helpers');
 
 /**
@@ -39,6 +40,7 @@ const getActiveTimeEntry = asyncHandler(async (req, res) => {
   const activeQuery = `
     SELECT te.id, te.project_id, te.task_id, te.description, te.start_time,
            te.hourly_rate, te.billable, te.created_at,
+           TIMESTAMPDIFF(MINUTE, te.start_time, NOW()) as current_duration_minutes,
            p.name as project_name, p.status as project_status,
            c.name as client_name, c.company as client_company,
            t.name as task_name
@@ -61,7 +63,6 @@ const getActiveTimeEntry = asyncHandler(async (req, res) => {
   }
 
   const entry = activeEntries[0];
-  const currentDuration = calculateDuration(entry.start_time, new Date());
 
   res.json({
     status: API_RESPONSE.SUCCESS,
@@ -77,7 +78,7 @@ const getActiveTimeEntry = asyncHandler(async (req, res) => {
         task_name: entry.task_name,
         description: entry.description,
         start_time: formatDate(entry.start_time),
-        current_duration_minutes: currentDuration,
+        current_duration_minutes: entry.current_duration_minutes || 0,
         hourly_rate: parseFloat(entry.hourly_rate) || 0,
         billable: Boolean(entry.billable),
         created_at: formatDate(entry.created_at)
@@ -114,9 +115,9 @@ const clockIn = asyncHandler(async (req, res) => {
   `;
   const projectParams = [project_id];
 
-  if (req.user.role === USER_ROLES.EMPLOYEE) {
-    projectQuery += ' AND p.assigned_to = ?';
-    projectParams.push(userId);
+  if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role)) {
+    projectQuery += ` AND ${employeeProjectAccess('p')}`;
+    pushEmployeeProjectAccessParams(projectParams, userId);
   }
 
   const projects = await executeQuery(projectQuery, projectParams);
@@ -224,22 +225,31 @@ const clockOut = asyncHandler(async (req, res) => {
   }
 
   const activeEntry = activeEntries[0];
-  const endTime = new Date();
-  const duration = calculateDuration(activeEntry.start_time, endTime);
 
-  // Update time entry
+  // Compute the end time and duration in SQL so they use the same clock as the
+  // clock-in insert (which stores start_time with NOW()). Mixing a SQL local
+  // timestamp with a JS UTC Date previously inflated durations by the server's
+  // UTC offset.
   const updateQuery = `
     UPDATE time_entries 
-    SET end_time = ?, duration_minutes = ?, description = COALESCE(?, description), updated_at = NOW()
+    SET end_time = NOW(),
+        duration_minutes = TIMESTAMPDIFF(MINUTE, start_time, NOW()),
+        description = COALESCE(?, description),
+        updated_at = NOW()
     WHERE id = ?
   `;
 
   await executeQuery(updateQuery, [
-    endTime,
-    duration,
     description,
     activeEntry.id
   ]);
+
+  const closedRows = await executeQuery(
+    'SELECT end_time, duration_minutes FROM time_entries WHERE id = ?',
+    [activeEntry.id]
+  );
+  const endTime = closedRows[0].end_time;
+  const duration = closedRows[0].duration_minutes;
 
   // Update project actual hours
   await executeQuery(`
@@ -293,7 +303,7 @@ const getTimeEntries = asyncHandler(async (req, res) => {
   const queryParams = [];
 
   // Role-based filtering
-  if (req.user.role === USER_ROLES.EMPLOYEE) {
+  if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role)) {
     whereConditions.push('te.user_id = ?');
     queryParams.push(req.user.id);
   } else if (user_id && req.user.role !== USER_ROLES.ADMIN) {
@@ -424,8 +434,15 @@ const createTimeEntry = asyncHandler(async (req, res) => {
     billable = true
   } = req.body;
 
+  // Normalize incoming timestamps to absolute instants. The client sends ISO 8601
+  // with an offset (e.g. 2026-09-28T20:59:00.000Z); a naive string falls back to
+  // server-local. Binding Date objects lets mysql2 apply the connection timezone,
+  // so the stored instant is correct regardless of the viewer's timezone.
+  const startAt = start_time ? new Date(start_time) : null;
+  const endAt = end_time ? new Date(end_time) : null;
+
   // Validate time range
-  const timeValidation = validateTimeRange(start_time, end_time);
+  const timeValidation = validateTimeRange(startAt, endAt);
   if (!timeValidation.isValid) {
     throw new ValidationError(timeValidation.error);
   }
@@ -439,9 +456,9 @@ const createTimeEntry = asyncHandler(async (req, res) => {
   `;
   const projectParams = [project_id];
 
-  if (req.user.role === USER_ROLES.EMPLOYEE) {
-    projectQuery += ' AND p.assigned_to = ?';
-    projectParams.push(userId);
+  if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role)) {
+    projectQuery += ` AND ${employeeProjectAccess('p')}`;
+    pushEmployeeProjectAccessParams(projectParams, userId);
   }
 
   const projects = await executeQuery(projectQuery, projectParams);
@@ -463,7 +480,7 @@ const createTimeEntry = asyncHandler(async (req, res) => {
   `;
 
   const overlapping = await executeQuery(overlapQuery, [
-    userId, start_time, start_time, end_time, end_time, start_time, end_time
+    userId, startAt, startAt, endAt, endAt, startAt, endAt
   ]);
 
   if (overlapping.length > 0) {
@@ -487,8 +504,8 @@ const createTimeEntry = asyncHandler(async (req, res) => {
     project_id,
     task_id || null,
     description || null,
-    start_time,
-    end_time,
+    startAt,
+    endAt,
     duration,
     entryHourlyRate || null,
     billable ? 1 : 0
@@ -575,7 +592,7 @@ const updateTimeEntry = asyncHandler(async (req, res) => {
   const entry = entries[0];
 
   // Check permissions
-  if (req.user.role === USER_ROLES.EMPLOYEE && entry.user_id !== req.user.id) {
+  if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role) && entry.user_id !== req.user.id) {
     throw new AuthorizationError('Access denied');
   } else if (req.user.role === USER_ROLES.MANAGER) {
     if (entry.user_id !== req.user.id && 
@@ -600,13 +617,15 @@ const updateTimeEntry = asyncHandler(async (req, res) => {
   }
 
   if (start_time && end_time) {
-    const timeValidation = validateTimeRange(start_time, end_time);
+    const startAt = new Date(start_time);
+    const endAt = new Date(end_time);
+    const timeValidation = validateTimeRange(startAt, endAt);
     if (!timeValidation.isValid) {
       throw new ValidationError(timeValidation.error);
     }
 
     updateFields.push('start_time = ?', 'end_time = ?', 'duration_minutes = ?');
-    updateValues.push(start_time, end_time, timeValidation.duration);
+    updateValues.push(startAt, endAt, timeValidation.duration);
   }
 
   if (billable !== undefined) {
@@ -674,7 +693,7 @@ const deleteTimeEntry = asyncHandler(async (req, res) => {
   const entry = entries[0];
 
   // Check permissions
-  if (req.user.role === USER_ROLES.EMPLOYEE && entry.user_id !== req.user.id) {
+  if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role) && entry.user_id !== req.user.id) {
     throw new AuthorizationError('Access denied');
   } else if (req.user.role === USER_ROLES.MANAGER) {
     if (entry.user_id !== req.user.id && 
@@ -734,7 +753,7 @@ const getTimeEntryById = asyncHandler(async (req, res) => {
   const queryParams = [entryId];
 
   // Role-based filtering
-  if (req.user.role === USER_ROLES.EMPLOYEE) {
+  if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role)) {
     entryQuery += ' AND te.user_id = ?';
     queryParams.push(req.user.id);
   } else if (req.user.role === USER_ROLES.MANAGER) {
@@ -803,7 +822,7 @@ const getUserTimeEntries = asyncHandler(async (req, res) => {
   const { page, limit, offset } = parsePagination(req.query);
 
   // Check permissions
-  if (req.user.role === USER_ROLES.EMPLOYEE && targetUserId != req.user.id) {
+  if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role) && targetUserId != req.user.id) {
     throw new AuthorizationError('Access denied');
   }
 
@@ -887,9 +906,9 @@ const getProjectTimeEntries = asyncHandler(async (req, res) => {
   `;
   const projectParams = [projectId];
 
-  if (req.user.role === USER_ROLES.EMPLOYEE) {
-    projectQuery += ' AND assigned_to = ?';
-    projectParams.push(req.user.id);
+  if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role)) {
+    projectQuery += ` AND ${employeeProjectAccess('projects')}`;
+    pushEmployeeProjectAccessParams(projectParams, req.user.id);
   } else if (req.user.role === USER_ROLES.MANAGER) {
     projectQuery += ' AND (assigned_to = ? OR created_by = ?)';
     projectParams.push(req.user.id, req.user.id);
@@ -969,7 +988,7 @@ const getTimeEntriesByDateRange = asyncHandler(async (req, res) => {
   const queryParams = [start_date, end_date];
 
   // Role-based filtering
-  if (req.user.role === USER_ROLES.EMPLOYEE) {
+  if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role)) {
     whereConditions.push('te.user_id = ?');
     queryParams.push(req.user.id);
   } else if (user_id && req.user.role === USER_ROLES.MANAGER) {
@@ -1060,6 +1079,10 @@ const createBulkTimeEntries = asyncHandler(async (req, res) => {
   const results = [];
   const errors = [];
 
+  // Employees and contractors may only log time against projects they can
+  // access, mirroring the single time-entry creation path.
+  const isProjectScoped = [USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role);
+
   for (let i = 0; i < entries.length; i++) {
     try {
       const entry = entries[i];
@@ -1078,6 +1101,24 @@ const createBulkTimeEntries = asyncHandler(async (req, res) => {
       const timeValidation = validateTimeRange(start_time, end_time);
       if (!timeValidation.isValid) {
         throw new ValidationError(`Entry ${i + 1}: ${timeValidation.error}`);
+      }
+
+      // Verify project access before creating the entry.
+      if (isProjectScoped) {
+        const accessQuery = `
+          SELECT p.id FROM projects p
+          WHERE p.id = ? AND p.is_active = 1 AND ${employeeProjectAccess('p')}
+        `;
+        const access = await executeQuery(accessQuery, [
+          project_id,
+          req.user.id,
+          req.user.id,
+          req.user.id
+        ]);
+
+        if (access.length === 0) {
+          throw new NotFoundError('Project');
+        }
       }
 
       // Create time entry
@@ -1164,7 +1205,7 @@ const updateBulkTimeEntries = asyncHandler(async (req, res) => {
       const entry = entries[0];
 
       // Check permissions
-      if (req.user.role === USER_ROLES.EMPLOYEE && entry.user_id !== req.user.id) {
+      if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role) && entry.user_id !== req.user.id) {
         throw new AuthorizationError(`Access denied for entry ${id}`);
       }
 
@@ -1260,7 +1301,7 @@ const deleteBulkTimeEntries = asyncHandler(async (req, res) => {
       const entry = entries[0];
 
       // Check permissions
-      if (req.user.role === USER_ROLES.EMPLOYEE && entry.user_id !== req.user.id) {
+      if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role) && entry.user_id !== req.user.id) {
         throw new AuthorizationError(`Access denied for entry ${id}`);
       }
 
@@ -1316,7 +1357,7 @@ const exportTimeEntries = asyncHandler(async (req, res) => {
   const queryParams = [];
 
   // Role-based filtering
-  if (req.user.role === USER_ROLES.EMPLOYEE) {
+  if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role)) {
     whereConditions.push('te.user_id = ?');
     queryParams.push(req.user.id);
   } else if (user_id && req.user.role === USER_ROLES.MANAGER) {
@@ -1431,7 +1472,7 @@ const getTimeEntriesSummary = asyncHandler(async (req, res) => {
   const queryParams = [];
 
   // Role-based filtering
-  if (req.user.role === USER_ROLES.EMPLOYEE) {
+  if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role)) {
     whereConditions.push('te.user_id = ?');
     queryParams.push(req.user.id);
   } else if (user_id && req.user.role === USER_ROLES.MANAGER) {

@@ -37,7 +37,20 @@ router.get('/stats', dashboardController.getDashboardStats);
  * @desc    Get time tracking dashboard data
  * @access  Private (Admin, Manager, Employee - filtered by role)
  */
-router.get('/time-tracking', dashboardController.getTimeTrackingDashboard);
+router.get('/time-tracking',
+  authorize(['admin', 'manager', 'employee']),
+  dashboardController.getTimeTrackingDashboard
+);
+
+/**
+ * @route   GET /api/dashboard/time-report
+ * @desc    Get time report for a date range (used by utils/api.js getTimeReport)
+ * @access  Private (Admin, Manager, Employee - filtered by role)
+ */
+router.get('/time-report',
+  authorize(['admin', 'manager', 'employee']),
+  dashboardController.getTimeReport
+);
 
 /**
  * @route   GET /api/dashboard/projects
@@ -49,7 +62,7 @@ router.get('/projects', dashboardController.getProjectsDashboard);
 /**
  * @route   GET /api/dashboard/clients
  * @desc    Get clients dashboard data
- * @access  Private (Admin, Manager only)
+ * @access  Private (Admin, Manager)
  */
 router.get('/clients', 
   authorize(['admin', 'manager']), 
@@ -59,7 +72,7 @@ router.get('/clients',
 /**
  * @route   GET /api/dashboard/billing
  * @desc    Get billing dashboard data
- * @access  Private (Admin, Manager only)
+ * @access  Private (Admin, Manager)
  */
 router.get('/billing', 
   authorize(['admin', 'manager']), 
@@ -69,7 +82,7 @@ router.get('/billing',
 /**
  * @route   GET /api/dashboard/team
  * @desc    Get team dashboard data
- * @access  Private (Admin, Manager only)
+ * @access  Private (Admin, Manager)
  */
 router.get('/team', 
   authorize(['admin', 'manager']), 
@@ -79,7 +92,7 @@ router.get('/team',
 /**
  * @route   GET /api/dashboard/reports/productivity
  * @desc    Get productivity report
- * @access  Private (Admin, Manager only)
+ * @access  Private (Admin, Manager)
  */
 router.get('/reports/productivity', 
   authorize(['admin', 'manager']), 
@@ -91,12 +104,15 @@ router.get('/reports/productivity',
  * @desc    Get time summary report
  * @access  Private (Admin, Manager, Employee - filtered by role)
  */
-router.get('/reports/time-summary', dashboardController.getTimeSummaryReport);
+router.get('/reports/time-summary',
+  authorize(['admin', 'manager', 'employee']),
+  dashboardController.getTimeSummaryReport
+);
 
 /**
  * @route   GET /api/dashboard/reports/project-progress
  * @desc    Get project progress report
- * @access  Private (Admin, Manager only)
+ * @access  Private (Admin, Manager)
  */
 router.get('/reports/project-progress', 
   authorize(['admin', 'manager']), 
@@ -108,19 +124,25 @@ router.get('/reports/project-progress',
  * @desc    Get time distribution chart data
  * @access  Private (Admin, Manager, Employee - filtered by role)
  */
-router.get('/charts/time-distribution', dashboardController.getTimeDistributionChart);
+router.get('/charts/time-distribution',
+  authorize(['admin', 'manager', 'employee']),
+  dashboardController.getTimeDistributionChart
+);
 
 /**
  * @route   GET /api/dashboard/charts/project-hours
  * @desc    Get project hours chart data
  * @access  Private (Admin, Manager, Employee - filtered by role)
  */
-router.get('/charts/project-hours', dashboardController.getProjectHoursChart);
+router.get('/charts/project-hours',
+  authorize(['admin', 'manager', 'employee']),
+  dashboardController.getProjectHoursChart
+);
 
 /**
  * @route   GET /api/dashboard/charts/revenue-trend
  * @desc    Get revenue trend chart data
- * @access  Private (Admin, Manager only)
+ * @access  Private (Admin, Manager)
  */
 router.get('/charts/revenue-trend', 
   authorize(['admin', 'manager']), 
@@ -130,7 +152,7 @@ router.get('/charts/revenue-trend',
 /**
  * @route   GET /api/dashboard/charts/team-performance
  * @desc    Get team performance chart data
- * @access  Private (Admin, Manager only)
+ * @access  Private (Admin, Manager)
  */
 router.get('/charts/team-performance', 
   authorize(['admin', 'manager']), 
@@ -142,14 +164,20 @@ router.get('/charts/team-performance',
  * @desc    Get recent activity feed
  * @access  Private (Admin, Manager, Employee - filtered by role)
  */
-router.get('/recent-activity', dashboardController.getRecentActivity);
+router.get('/recent-activity',
+  authorize(['admin', 'manager', 'employee']),
+  dashboardController.getRecentActivity
+);
 
 /**
  * @route   GET /api/dashboard/notifications
  * @desc    Get dashboard notifications
  * @access  Private (Admin, Manager, Employee - filtered by role)
  */
-router.get('/notifications', dashboardController.getDashboardNotifications);
+router.get('/notifications',
+  authorize(['admin', 'manager', 'employee']),
+  dashboardController.getDashboardNotifications
+);
 
 /**
  * @route   GET /api/dashboard/quick-actions

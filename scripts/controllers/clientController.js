@@ -20,7 +20,9 @@ const {
   parsePagination, 
   buildPaginatedResponse,
   formatDate,
-  removeEmptyValues 
+  removeEmptyValues,
+  employeeProjectAccess,
+  pushEmployeeProjectAccessParams
 } = require('../utils/helpers');
 
 /**
@@ -42,9 +44,12 @@ const getClients = asyncHandler(async (req, res) => {
       c.id IN (
         SELECT DISTINCT p.client_id 
         FROM projects p 
-        WHERE p.assigned_to = ? AND p.is_active = 1
+        WHERE ${employeeProjectAccess('p')} AND p.is_active = 1
       )
     `);
+    pushEmployeeProjectAccessParams(queryParams, req.user.id);
+  } else if (req.user.role === USER_ROLES.CONTRACTOR) {
+    whereConditions.push('c.created_by = ?');
     queryParams.push(req.user.id);
   }
 
@@ -144,8 +149,11 @@ const getClientById = asyncHandler(async (req, res) => {
     clientQuery += ` AND c.id IN (
       SELECT DISTINCT p2.client_id 
       FROM projects p2 
-      WHERE p2.assigned_to = ? AND p2.is_active = 1
+      WHERE ${employeeProjectAccess('p2')} AND p2.is_active = 1
     )`;
+    pushEmployeeProjectAccessParams(queryParams, req.user.id);
+  } else if (req.user.role === USER_ROLES.CONTRACTOR) {
+    clientQuery += ' AND c.created_by = ?';
     queryParams.push(req.user.id);
   }
 
@@ -241,8 +249,8 @@ const createClient = asyncHandler(async (req, res) => {
   const insertQuery = `
     INSERT INTO clients (
       name, company, email, phone, address, hourly_rate, currency,
-      billing_address, tax_id, payment_terms, notes, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+      billing_address, tax_id, payment_terms, notes, created_by, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
   `;
 
   const result = await executeQuery(insertQuery, [
@@ -256,7 +264,8 @@ const createClient = asyncHandler(async (req, res) => {
     billing_address || null,
     tax_id || null,
     payment_terms,
-    notes || null
+    notes || null,
+    req.user.id
   ]);
 
   // Get the created client
@@ -305,8 +314,15 @@ const updateClient = asyncHandler(async (req, res) => {
   const updateData = removeEmptyValues(req.body);
 
   // Check if client exists
-  const existingQuery = 'SELECT id FROM clients WHERE id = ?';
-  const existing = await executeQuery(existingQuery, [clientId]);
+  let existingQuery = 'SELECT id FROM clients WHERE id = ?';
+  const existingParams = [clientId];
+
+  if (req.user.role === USER_ROLES.CONTRACTOR) {
+    existingQuery += ' AND created_by = ?';
+    existingParams.push(req.user.id);
+  }
+
+  const existing = await executeQuery(existingQuery, existingParams);
   
   if (existing.length === 0) {
     throw new NotFoundError('Client not found');
@@ -427,10 +443,26 @@ const getClientStats = asyncHandler(async (req, res) => {
   const clientId = req.params.id;
 
   // Verify client exists and user has access
-  const clientQuery = `
+  let clientQuery = `
     SELECT id, name FROM clients WHERE id = ? AND is_active = 1
   `;
-  const clients = await executeQuery(clientQuery, [clientId]);
+  const clientParams = [clientId];
+
+  // Contractors only own the clients they created; employees reach clients
+  // through projects they can access. Admin/manager stay unrestricted.
+  if (req.user.role === USER_ROLES.EMPLOYEE) {
+    clientQuery += ` AND id IN (
+      SELECT DISTINCT p.client_id
+      FROM projects p
+      WHERE ${employeeProjectAccess('p')} AND p.is_active = 1
+    )`;
+    pushEmployeeProjectAccessParams(clientParams, req.user.id);
+  } else if (req.user.role === USER_ROLES.CONTRACTOR) {
+    clientQuery += ' AND created_by = ?';
+    clientParams.push(req.user.id);
+  }
+
+  const clients = await executeQuery(clientQuery, clientParams);
   
   if (clients.length === 0) {
     throw new NotFoundError('Client not found');
@@ -519,8 +551,11 @@ const getClientProjects = asyncHandler(async (req, res) => {
     clientQuery += ` AND id IN (
       SELECT DISTINCT p.client_id
       FROM projects p
-      WHERE p.assigned_to = ? AND p.is_active = 1
+      WHERE ${employeeProjectAccess('p')} AND p.is_active = 1
     )`;
+    pushEmployeeProjectAccessParams(clientParams, req.user.id);
+  } else if (req.user.role === USER_ROLES.CONTRACTOR) {
+    clientQuery += ' AND created_by = ?';
     clientParams.push(req.user.id);
   }
 
@@ -536,8 +571,8 @@ const getClientProjects = asyncHandler(async (req, res) => {
 
   // Role-based filtering for employees
   if (req.user.role === USER_ROLES.EMPLOYEE) {
-    whereConditions.push('p.assigned_to = ?');
-    queryParams.push(req.user.id);
+    whereConditions.push(employeeProjectAccess('p'));
+    pushEmployeeProjectAccessParams(queryParams, req.user.id);
   }
 
   if (status) {
@@ -630,8 +665,11 @@ const getClientTime = asyncHandler(async (req, res) => {
     clientQuery += ` AND id IN (
       SELECT DISTINCT p.client_id
       FROM projects p
-      WHERE p.assigned_to = ? AND p.is_active = 1
+      WHERE ${employeeProjectAccess('p')} AND p.is_active = 1
     )`;
+    pushEmployeeProjectAccessParams(clientParams, req.user.id);
+  } else if (req.user.role === USER_ROLES.CONTRACTOR) {
+    clientQuery += ' AND created_by = ?';
     clientParams.push(req.user.id);
   }
 
@@ -704,8 +742,11 @@ const getClientInvoices = asyncHandler(async (req, res) => {
     clientQuery += ` AND id IN (
       SELECT DISTINCT p.client_id
       FROM projects p
-      WHERE p.assigned_to = ? AND p.is_active = 1
+      WHERE ${employeeProjectAccess('p')} AND p.is_active = 1
     )`;
+    pushEmployeeProjectAccessParams(clientParams, req.user.id);
+  } else if (req.user.role === USER_ROLES.CONTRACTOR) {
+    clientQuery += ' AND created_by = ?';
     clientParams.push(req.user.id);
   }
 

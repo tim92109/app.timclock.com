@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash VARCHAR(255) NOT NULL,
     first_name VARCHAR(50) NOT NULL,
     last_name VARCHAR(50) NOT NULL,
-    role ENUM('admin', 'manager', 'employee') DEFAULT 'employee',
+    role ENUM('admin', 'manager', 'employee', 'contractor') DEFAULT 'employee',
     hourly_rate DECIMAL(10,2) DEFAULT NULL,
     phone VARCHAR(20) DEFAULT NULL,
     is_active BOOLEAN DEFAULT TRUE,
@@ -91,9 +91,9 @@ CREATE TABLE IF NOT EXISTS time_entries (
     description TEXT DEFAULT NULL,
     hourly_rate DECIMAL(10,2) DEFAULT NULL,
     billable BOOLEAN DEFAULT TRUE,
-    billed BOOLEAN DEFAULT FALSE,
+    invoiced TINYINT(1) NOT NULL DEFAULT 0,
     invoice_id INT DEFAULT NULL,
-    entry_type ENUM('automatic', 'manual') DEFAULT 'automatic',
+    is_manual TINYINT(1) NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     
@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS time_entries (
     INDEX idx_project (project_id),
     INDEX idx_start_time (start_time),
     INDEX idx_billable (billable),
-    INDEX idx_billed (billed)
+    INDEX idx_invoiced (invoiced)
 );
 
 -- Invoices table
@@ -152,34 +152,10 @@ CREATE TABLE IF NOT EXISTS invoice_items (
     INDEX idx_invoice (invoice_id)
 );
 
--- Create default admin user (password: admin123)
-INSERT IGNORE INTO users (username, email, password_hash, first_name, last_name, role) 
-VALUES (
-    'admin', 
-    'admin@timeclock.com', 
-    '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj/VcSAg/9qm', 
-    'Admin', 
-    'User', 
-    'admin'
-);
-
--- Create sample client
-INSERT IGNORE INTO clients (name, company, email, hourly_rate, created_by) 
-VALUES (
-    'John Doe', 
-    'Sample Company', 
-    'john@example.com', 
-    75.00, 
-    1
-);
-
--- Create sample project
-INSERT IGNORE INTO projects (name, description, client_id, hourly_rate, created_by, assigned_to) 
-VALUES (
-    'Sample Project', 
-    'This is a sample project for testing', 
-    1, 
-    75.00, 
-    1, 
-    1
-);
+-- Schema only. No seed/demo data is created here.
+--
+-- Demo users are created explicitly in development via `npm run seed-users`,
+-- which sources passwords from SEED_ADMIN_PASSWORD / SEED_MANAGER_PASSWORD /
+-- SEED_EMPLOYEE_PASSWORD (dev-only fallbacks) and refuses to run against
+-- NODE_ENV=production without --force. Production accounts must be provisioned
+-- through the application's registration/admin flows, never by this script.

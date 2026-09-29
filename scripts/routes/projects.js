@@ -22,30 +22,30 @@ router.get('/', projectController.getProjects);
 /**
  * @route   GET /api/projects/templates
  * @desc    Get project templates
- * @access  Private (Admin, Manager only)
+ * @access  Private (Admin, Manager, Contractor)
  */
 router.get('/templates', 
-  authorize(['admin', 'manager']), 
+  authorize(['admin', 'manager', 'contractor']), 
   projectController.getProjectTemplates
 );
 
 /**
  * @route   POST /api/projects/from-template
  * @desc    Create project from template
- * @access  Private (Admin, Manager only)
+ * @access  Private (Admin, Manager, Contractor)
  */
 router.post('/from-template', 
-  authorize(['admin', 'manager']), 
+  authorize(['admin', 'manager', 'contractor']), 
   projectController.createProjectFromTemplate
 );
 
 /**
  * @route   POST /api/projects
  * @desc    Create new project
- * @access  Private (Admin, Manager only)
+ * @access  Private (Admin, Manager, Contractor)
  */
 router.post('/', 
-  authorize(['admin', 'manager']), 
+  authorize(['admin', 'manager', 'contractor']), 
   validateProject, 
   projectController.createProject
 );
@@ -60,10 +60,10 @@ router.get('/:id', projectController.getProjectById);
 /**
  * @route   PUT /api/projects/:id
  * @desc    Update project
- * @access  Private (Admin, Manager only)
+ * @access  Private (Admin, Manager, Contractor)
  */
 router.put('/:id', 
-  authorize(['admin', 'manager']), 
+  authorize(['admin', 'manager', 'contractor']), 
   validateProjectUpdate, 
   projectController.updateProject
 );
@@ -114,6 +114,36 @@ router.get('/:id/users', projectController.getProjectUsers);
 router.get('/:id/tasks', projectController.getProjectTasks);
 
 /**
+ * @route   POST /api/projects/:id/tasks
+ * @desc    Create a task for a project
+ * @access  Private (Admin, Manager, Contractor)
+ */
+router.post('/:id/tasks',
+  authorize(['admin', 'manager', 'contractor']),
+  projectController.createTask
+);
+
+/**
+ * @route   PUT /api/projects/:id/tasks/:taskId
+ * @desc    Update a task
+ * @access  Private (Admin, Manager, Contractor)
+ */
+router.put('/:id/tasks/:taskId',
+  authorize(['admin', 'manager', 'contractor']),
+  projectController.updateTask
+);
+
+/**
+ * @route   DELETE /api/projects/:id/tasks/:taskId
+ * @desc    Delete a task
+ * @access  Private (Admin, Manager, Contractor)
+ */
+router.delete('/:id/tasks/:taskId',
+  authorize(['admin', 'manager', 'contractor']),
+  projectController.deleteTask
+);
+
+/**
  * @route   GET /api/projects/:id/time
  * @desc    Get all time entries for project (alias for time-entries)
  * @access  Private (Admin, Manager, Employee - filtered by access)
@@ -130,20 +160,20 @@ router.get('/:id/time-entries', projectController.getProjectTimeEntries);
 /**
  * @route   GET /api/projects/:id/stats
  * @desc    Get project statistics
- * @access  Private (Admin, Manager only)
+ * @access  Private (Admin, Manager, Contractor)
  */
 router.get('/:id/stats', 
-  authorize(['admin', 'manager']), 
+  authorize(['admin', 'manager', 'contractor']), 
   projectController.getProjectStats
 );
 
 /**
  * @route   POST /api/projects/:id/status
  * @desc    Update project status
- * @access  Private (Admin, Manager only)
+ * @access  Private (Admin, Manager, Contractor)
  */
 router.post('/:id/status', 
-  authorize(['admin', 'manager']), 
+  authorize(['admin', 'manager', 'contractor']), 
   projectController.updateProjectStatus
 );
 

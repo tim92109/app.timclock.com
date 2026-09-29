@@ -2,6 +2,7 @@
 export const USER_ROLES = {
   ADMIN: 'admin',
   MANAGER: 'manager',
+  CONTRACTOR: 'contractor',
   EMPLOYEE: 'employee',
 };
 
@@ -48,6 +49,11 @@ export const ROLE_CONFIG = {
     bgColor: 'bg-blue-100',
     textColor: 'text-blue-800',
   },
+  [USER_ROLES.CONTRACTOR]: {
+    label: 'Contractor',
+    bgColor: 'bg-amber-100',
+    textColor: 'text-amber-800',
+  },
   [USER_ROLES.EMPLOYEE]: {
     label: 'Employee',
     bgColor: 'bg-green-100',
@@ -79,16 +85,19 @@ export const STATUS_CONFIG = {
 export const getNavigationItems = (userRole) => {
   const baseItems = [
     {
+      key: 'dashboard',
       name: 'Dashboard',
       href: '/dashboard',
       icon: 'LayoutDashboard',
     },
     {
+      key: 'timeTracking',
       name: 'Time Tracking',
       href: '/time',
       icon: 'Clock',
     },
     {
+      key: 'projects',
       name: 'Projects',
       href: '/projects',
       icon: 'FolderOpen',
@@ -97,18 +106,33 @@ export const getNavigationItems = (userRole) => {
 
   const managerItems = [
     {
+      key: 'clients',
       name: 'Clients',
       href: '/clients',
       icon: 'Users',
     },
     {
+      key: 'billing',
       name: 'Billing',
       href: '/billing',
       icon: 'DollarSign',
     },
   ];
 
-  if (userRole === USER_ROLES.ADMIN || userRole === USER_ROLES.MANAGER) {
+  const teamItem = [
+    {
+      key: 'team',
+      name: 'Team',
+      href: '/team',
+      icon: 'Users',
+    },
+  ];
+
+  if ([USER_ROLES.ADMIN, USER_ROLES.MANAGER].includes(userRole)) {
+    return [...baseItems, ...managerItems, ...teamItem];
+  }
+
+  if (userRole === USER_ROLES.CONTRACTOR) {
     return [...baseItems, ...managerItems];
   }
 
@@ -143,8 +167,8 @@ export const API_ENDPOINTS = {
 
   // Time tracking
   TIME_ENTRIES: '/time',
-  TIME_START: '/time/start',
-  TIME_STOP: '/time/stop',
+  TIME_START: '/time/clock-in',
+  TIME_STOP: '/time/clock-out',
   TIME_ACTIVE: '/time/active',
   TIME_EXPORT: '/time/export',
 

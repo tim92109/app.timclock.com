@@ -13,7 +13,9 @@ const {
 } = require('../utils/constants');
 const { 
   formatDate,
-  calculateBillableAmount 
+  calculateBillableAmount,
+  employeeProjectAccess,
+  pushEmployeeProjectAccessParams
 } = require('../utils/helpers');
 
 /**
@@ -53,7 +55,7 @@ const getDashboardOverview = asyncHandler(async (req, res) => {
     SELECT COUNT(*) as count
     FROM projects
     WHERE status = 'active' AND is_active = 1
-    ${userRole === USER_ROLES.EMPLOYEE ? 'AND assigned_to = ?' : ''}
+    ${[USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(userRole) ? `AND ${employeeProjectAccess('projects')}` : ''}
   `;
 
   // Get recent activity (last 7 days)
@@ -74,18 +76,18 @@ const getDashboardOverview = asyncHandler(async (req, res) => {
     INNER JOIN clients c ON p.client_id = c.id
     WHERE p.due_date >= CURDATE() AND p.due_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)
       AND p.status IN ('active', 'open') AND p.is_active = 1
-    ${userRole === USER_ROLES.EMPLOYEE ? 'AND p.assigned_to = ?' : ''}
+    ${[USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(userRole) ? `AND ${employeeProjectAccess('p')}` : ''}
     ORDER BY p.due_date ASC
     LIMIT 10
   `;
 
-  if (userRole === USER_ROLES.EMPLOYEE) {
+  if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(userRole)) {
     const [hoursWeek, hoursToday, activeProjects, activity, deadlines] = await Promise.all([
       executeQuery(hoursThisWeekQuery, [userId, weekStart]),
       executeQuery(hoursTodayQuery, [userId]),
-      executeQuery(activeProjectsQuery, [userId]),
+      executeQuery(activeProjectsQuery, [userId, userId, userId]),
       executeQuery(recentActivityQuery, [userId]),
-      executeQuery(upcomingDeadlinesQuery, [userId])
+      executeQuery(upcomingDeadlinesQuery, [userId, userId, userId])
     ]);
 
     stats = {
@@ -708,9 +710,9 @@ const getProjectsDashboard = asyncHandler(async (req, res) => {
   let queryParams = [];
 
   // Role-based filtering
-  if (userRole === USER_ROLES.EMPLOYEE) {
-    whereConditions.push('p.assigned_to = ?');
-    queryParams.push(userId);
+  if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(userRole)) {
+    whereConditions.push(employeeProjectAccess('p'));
+    pushEmployeeProjectAccessParams(queryParams, userId);
   } else if (userRole === USER_ROLES.MANAGER) {
     whereConditions.push('(p.assigned_to = ? OR p.created_by = ?)');
     queryParams.push(userId, userId);

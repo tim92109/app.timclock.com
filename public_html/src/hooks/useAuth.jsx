@@ -1,5 +1,5 @@
-import { createContext, useContext, useState, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { authAPI, tokenManager } from '../services/api';
 import toast from 'react-hot-toast';
 
@@ -18,11 +18,23 @@ export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const queryClient = useQueryClient();
+  const hasBootstrapped = useRef(false);
 
   // Check if user is authenticated on app load
   useEffect(() => {
-    // With HttpOnly cookies, we can't check token presence client-side
-    // Instead, verify token via API which will send cookies automatically
+    // React 18 StrictMode runs effects twice in development; only bootstrap once.
+    if (hasBootstrapped.current) return;
+    hasBootstrapped.current = true;
+
+    const token = tokenManager.getToken();
+
+    // No token means no session. Skip the API probe entirely so logged-out
+    // users do not generate a guaranteed 401 (and the error toast it causes).
+    if (!token) {
+      setIsLoading(false);
+      return;
+    }
+
     authAPI.verifyToken()
       .then(() => {
         return authAPI.getProfile();

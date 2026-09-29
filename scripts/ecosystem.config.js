@@ -19,10 +19,21 @@ module.exports = {
       },
       
       // Production environment
+      // Secrets are supplied by the host / pm2 environment (e.g. `pm2 start
+      // ecosystem.config.js --env production` with variables exported on the
+      // server, or pm2's `--update-env`). No secret literals live in this file.
       env_production: {
-        NODE_ENV: 'production',
-        PORT: 3000,
-        HOST: '0.0.0.0'
+        NODE_ENV: process.env.NODE_ENV || 'production',
+        PORT: process.env.PORT || 3000,
+        HOST: process.env.HOST || '0.0.0.0',
+        DB_HOST: process.env.DB_HOST,
+        DB_PORT: process.env.DB_PORT,
+        DB_NAME: process.env.DB_NAME,
+        DB_USER: process.env.DB_USER,
+        DB_PASSWORD: process.env.DB_PASSWORD,
+        JWT_SECRET: process.env.JWT_SECRET,
+        SESSION_SECRET: process.env.SESSION_SECRET,
+        ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS
       },
       
       // Logging

@@ -5,15 +5,19 @@
 @tailwind utilities;
 
 @layer base {
-  * {
+  #root {
+    width: 100%;
   }
-  
+
   body {
-    @apply bg-gray-50 flex font-sans antialiased;
+    @apply bg-gray-50 font-sans antialiased;
   }
-  
+
   html {
     scroll-behavior: smooth;
+    /* Reserve the scrollbar track so content width does not jump when the
+       vertical scrollbar appears/disappears (e.g. when switching language). */
+    scrollbar-gutter: stable;
   }
 }
 
@@ -31,7 +35,7 @@
   }
   
   .btn-outline {
-    @apply btn border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 hover:flex active:bg-gray-100;
+    @apply btn border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 active:bg-gray-100;
   }
   
   .btn-ghost {
@@ -131,7 +135,7 @@
   }
   
   .table-row {
-    @apply border-b border-gray-100 transition-colors hover:bg-gray-50 hover:flex data-[state=selected]:bg-gray-50 data-[state=selected]:flex;
+    @apply border-b border-gray-100 transition-colors hover:bg-gray-50 data-[state=selected]:bg-gray-50;
   }
   
   .table-head {
@@ -187,6 +191,82 @@
   .text-balance {
     text-wrap: balance;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   Dark theme overrides.
+   Scoped under `html.dark` (toggled by the SettingsProvider) so existing
+   components remain usable in dark mode without per-component edits.
+--------------------------------------------------------------------------- */
+html.dark {
+  color-scheme: dark;
+}
+
+html.dark body {
+  background-color: #0f172a;
+  color: #e5e7eb;
+}
+
+html.dark .bg-white {
+  background-color: #1e293b;
+}
+
+html.dark .bg-gray-50 {
+  background-color: #0f172a;
+}
+
+html.dark .bg-gray-100 {
+  background-color: #334155;
+}
+
+html.dark .text-gray-900 {
+  color: #f1f5f9;
+}
+
+html.dark .text-gray-800 {
+  color: #e2e8f0;
+}
+
+html.dark .text-gray-700 {
+  color: #cbd5e1;
+}
+
+html.dark .text-gray-600,
+html.dark .text-gray-500 {
+  color: #94a3b8;
+}
+
+html.dark .border-gray-200 {
+  border-color: #334155;
+}
+
+html.dark .border-gray-100 {
+  border-color: #1e293b;
+}
+
+html.dark .border-gray-300 {
+  border-color: #334155;
+}
+
+html.dark .input,
+html.dark .select,
+html.dark .textarea {
+  background-color: #1e293b;
+  border-color: #334155;
+  color: #e5e7eb;
+}
+
+html.dark .input::placeholder,
+html.dark .textarea::placeholder {
+  color: #64748b;
+}
+
+html.dark .hover\:bg-gray-50:hover {
+  background-color: #334155;
+}
+
+html.dark .hover\:bg-gray-100:hover {
+  background-color: #334155;
 }
 
 /* Custom scrollbar */

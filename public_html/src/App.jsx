@@ -4,6 +4,7 @@ import Layout from './components/Layout/Layout';
 import Login from './components/Auth/Login';
 import Register from './components/Auth/Register';
 import Profile from './components/Auth/Profile';
+import Settings from './components/Settings/Settings';
 import Dashboard from './components/Dashboard/Dashboard';
 import TimeTracking from './components/TimeTracking/TimeTracking';
 import Projects from './components/Projects/Projects';
@@ -11,10 +12,12 @@ import ProjectDetail from './components/Projects/ProjectDetail';
 import Clients from './components/Clients/Clients';
 import ClientDetail from './components/Clients/ClientDetail';
 import Billing from './components/Billing/Billing';
+import Team from './components/Team/Team';
 import LoadingSpinner from './components/Common/LoadingSpinner';
+import { USER_ROLES } from './utils/constants';
 
-// Protected Route Component
-const ProtectedRoute = ({ children }) => {
+// Protected Route Component (optionally restricted to specific roles)
+const ProtectedRoute = ({ children, roles }) => {
   const { user, isLoading } = useAuth();
 
   if (isLoading) {
@@ -27,6 +30,10 @@ const ProtectedRoute = ({ children }) => {
 
   if (!user) {
     return <Navigate to="/login" replace />;
+  }
+
+  if (roles && !roles.includes(user.role)) {
+    return <Navigate to="/dashboard" replace />;
   }
 
   return <Layout>{children}</Layout>;
@@ -114,7 +121,7 @@ function App() {
           <Route 
             path="/clients" 
             element={
-              <ProtectedRoute>
+              <ProtectedRoute roles={[USER_ROLES.ADMIN, USER_ROLES.MANAGER, USER_ROLES.CONTRACTOR]}>
                 <Clients />
               </ProtectedRoute>
             } 
@@ -123,7 +130,7 @@ function App() {
           <Route 
             path="/clients/:id" 
             element={
-              <ProtectedRoute>
+              <ProtectedRoute roles={[USER_ROLES.ADMIN, USER_ROLES.MANAGER, USER_ROLES.CONTRACTOR]}>
                 <ClientDetail />
               </ProtectedRoute>
             } 
@@ -132,8 +139,17 @@ function App() {
           <Route 
             path="/billing" 
             element={
-              <ProtectedRoute>
+              <ProtectedRoute roles={[USER_ROLES.ADMIN, USER_ROLES.MANAGER, USER_ROLES.CONTRACTOR]}>
                 <Billing />
+              </ProtectedRoute>
+            } 
+          />
+          
+          <Route 
+            path="/team" 
+            element={
+              <ProtectedRoute roles={[USER_ROLES.ADMIN, USER_ROLES.MANAGER]}>
+                <Team />
               </ProtectedRoute>
             } 
           />
@@ -143,6 +159,15 @@ function App() {
             element={
               <ProtectedRoute>
                 <Profile />
+              </ProtectedRoute>
+            } 
+          />
+
+          <Route 
+            path="/settings" 
+            element={
+              <ProtectedRoute>
+                <Settings />
               </ProtectedRoute>
             } 
           />

@@ -8,14 +8,17 @@ import {
   CreditCard, 
   BarChart3, 
   UserCog,
+  DollarSign,
   Menu,
   X,
   User,
-  Settings,
   LogOut,
-  Bell
+  Bell,
+  Settings
 } from 'lucide-react';
-import { useAuth } from '../../hooks/useAuth';
+import { useAuth } from '../../hooks/useAuth.jsx';
+import { useSettings } from '../../hooks/useSettings.jsx';
+import LanguageSwitcher from '../Common/LanguageSwitcher';
 import { getNavigationItems, USER_ROLES } from '../../utils/constants';
 import classNames from 'classnames';
 
@@ -27,12 +30,14 @@ const iconMap = {
   CreditCard,
   BarChart3,
   UserCog,
+  DollarSign,
 };
 
 const Layout = ({ children }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const { user, logout } = useAuth();
+  const { t } = useSettings();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -61,13 +66,13 @@ const Layout = ({ children }) => {
 
       {/* Sidebar */}
       <div className={classNames(
-        'fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-lg transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-0',
+        'fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-lg transform transition-transform duration-300 ease-in-out lg:translate-x-0',
         sidebarOpen ? 'translate-x-0' : '-translate-x-full'
       )}>
         <div className="flex items-center justify-between h-16 px-6 border-b border-gray-200">
           <div className="flex items-center">
             <Clock className="w-8 h-8 text-primary-600" />
-            <span className="ml-2 text-xl font-bold text-gray-900">Timelock</span>
+            <span className="ml-2 text-xl font-bold text-gray-900">TimClock</span>
           </div>
           <button
             onClick={() => setSidebarOpen(false)}
@@ -80,18 +85,18 @@ const Layout = ({ children }) => {
         <nav className="mt-6 px-3">
           <div className="space-y-1">
             {navigationItems.map((item) => {
-              const Icon = iconMap[item.icon];
+              const Icon = iconMap[item.icon] || Clock;
               const isActive = isActiveRoute(item.href);
               
               return (
                 <Link
-                  key={item.name}
+                  key={item.key}
                   to={item.href}
                   className={classNames(
                     'group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors',
                     isActive
                       ? 'bg-primary-100 text-primary-700 border-r-2 border-primary-600'
-                      : 'text-gray-600 hover:bg-gray-50 hover:flex hover:text-gray-900'
+                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                   )}
                   onClick={() => setSidebarOpen(false)}
                 >
@@ -99,7 +104,7 @@ const Layout = ({ children }) => {
                     'mr-3 w-5 h-5',
                     isActive ? 'text-primary-600' : 'text-gray-400 group-hover:text-gray-500'
                   )} />
-                  {item.name}
+                  {t(`nav.${item.key}`, item.name)}
                 </Link>
               );
             })}
@@ -125,11 +130,16 @@ const Layout = ({ children }) => {
               </p>
             </div>
           </div>
+
+          <div className="mt-3 pt-3 border-t border-gray-200 flex items-center justify-between">
+            <span className="text-xs text-gray-500">{t('settings.language')}</span>
+            <LanguageSwitcher />
+          </div>
         </div>
       </div>
 
       {/* Main content */}
-      <div className="lg:pl-64">
+      <div className="lg:pl-64 w-full min-w-0">
         {/* Top navigation */}
         <div className="sticky top-0 z-40 bg-white shadow-sm border-b border-gray-200">
           <div className="flex items-center justify-between h-16 px-4 sm:px-6 lg:px-8">
@@ -160,14 +170,14 @@ const Layout = ({ children }) => {
                 </button>
 
                 {profileDropdownOpen && (
-                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50">
+                  <div className="absolute left-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50">
                     <Link
                       to="/profile"
                       className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                       onClick={() => setProfileDropdownOpen(false)}
                     >
                       <User className="w-4 h-4 mr-3" />
-                      Profile
+                      {t('layout.profile')}
                     </Link>
                     <Link
                       to="/settings"
@@ -175,14 +185,14 @@ const Layout = ({ children }) => {
                       onClick={() => setProfileDropdownOpen(false)}
                     >
                       <Settings className="w-4 h-4 mr-3" />
-                      Settings
+                      {t('layout.settings')}
                     </Link>
                     <button
                       onClick={handleLogout}
                       className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                     >
                       <LogOut className="w-4 h-4 mr-3" />
-                      Sign out
+                      {t('layout.signOut')}
                     </button>
                   </div>
                 )}
@@ -193,7 +203,7 @@ const Layout = ({ children }) => {
 
         {/* Page content */}
         <main className="flex-1">
-          <div className="py-6">
+          <div className="py-6 px-4 sm:px-6 lg:px-8">
             {children}
           </div>
         </main>

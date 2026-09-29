@@ -8,7 +8,6 @@ import {
   Clock,
   DollarSign,
   Calendar,
-  User,
   FileText,
   Plus,
   Play,
@@ -17,30 +16,36 @@ import {
   Square
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { useSettings } from '../../hooks/useSettings.jsx';
+import { useAuth } from '../../hooks/useAuth.jsx';
 import { formatCurrency, formatDate, formatDuration } from '../../utils/helpers';
-import { STATUS_CONFIG } from '../../utils/constants';
+import { STATUS_CONFIG, USER_ROLES } from '../../utils/constants';
 import LoadingSpinner from '../Common/LoadingSpinner';
 import ErrorMessage from '../Common/ErrorMessage';
 import Modal from '../Common/Modal';
 import toast from 'react-hot-toast';
 
 const ProjectDetail = () => {
+  const { t } = useSettings();
+  const { user } = useAuth();
   const { id } = useParams();
   const queryClient = useQueryClient();
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
 
+  const canManage = [USER_ROLES.ADMIN, USER_ROLES.MANAGER, USER_ROLES.CONTRACTOR].includes(user?.role);
+
   // Fetch project details
   const { data: project, isLoading, error } = useQuery({
     queryKey: ['project', id],
-    queryFn: () => api.get(`/projects/${id}`).then(res => res.data),
+    queryFn: () => api.get(`/projects/${id}`).then(res => res.data.project),
   });
 
   // Fetch project tasks
   const { data: tasks } = useQuery({
     queryKey: ['project-tasks', id],
-    queryFn: () => api.get(`/projects/${id}/tasks`).then(res => res.data),
+    queryFn: () => api.get(`/projects/${id}/tasks`).then(res => res.data.tasks),
   });
 
   // Fetch project time entries
@@ -53,13 +58,13 @@ const ProjectDetail = () => {
   const addTaskMutation = useMutation({
     mutationFn: (data) => api.post(`/projects/${id}/tasks`, data),
     onSuccess: () => {
-      toast.success('Task added successfully');
-      queryClient.invalidateQueries(['project-tasks', id]);
+      toast.success(t('projects.task.toast.added'));
+      queryClient.invalidateQueries({ queryKey: ['project-tasks', id] });
       setShowTaskModal(false);
       reset();
     },
     onError: (error) => {
-      toast.error(error.response?.data?.message || 'Failed to add task');
+      toast.error(error.response?.data?.message || t('projects.task.toast.addFailed'));
     },
   });
 
@@ -67,14 +72,14 @@ const ProjectDetail = () => {
   const updateTaskMutation = useMutation({
     mutationFn: ({ taskId, data }) => api.put(`/projects/${id}/tasks/${taskId}`, data),
     onSuccess: () => {
-      toast.success('Task updated successfully');
-      queryClient.invalidateQueries(['project-tasks', id]);
+      toast.success(t('projects.task.toast.updated'));
+      queryClient.invalidateQueries({ queryKey: ['project-tasks', id] });
       setShowTaskModal(false);
       setEditingTask(null);
       reset();
     },
     onError: (error) => {
-      toast.error(error.response?.data?.message || 'Failed to update task');
+      toast.error(error.response?.data?.message || t('projects.task.toast.updateFailed'));
     },
   });
 
@@ -82,11 +87,11 @@ const ProjectDetail = () => {
   const deleteTaskMutation = useMutation({
     mutationFn: (taskId) => api.delete(`/projects/${id}/tasks/${taskId}`),
     onSuccess: () => {
-      toast.success('Task deleted successfully');
-      queryClient.invalidateQueries(['project-tasks', id]);
+      toast.success(t('projects.task.toast.deleted'));
+      queryClient.invalidateQueries({ queryKey: ['project-tasks', id] });
     },
     onError: (error) => {
-      toast.error(error.response?.data?.message || 'Failed to delete task');
+      toast.error(error.response?.data?.message || t('projects.task.toast.deleteFailed'));
     },
   });
 
@@ -95,21 +100,22 @@ const ProjectDetail = () => {
     mutationFn: ({ taskId, completed }) => 
       api.put(`/projects/${id}/tasks/${taskId}`, { completed }),
     onSuccess: () => {
-      queryClient.invalidateQueries(['project-tasks', id]);
+      queryClient.invalidateQueries({ queryKey: ['project-tasks', id] });
     },
     onError: (error) => {
-      toast.error(error.response?.data?.message || 'Failed to update task');
+      toast.error(error.response?.data?.message || t('projects.task.toast.updateFailed'));
     },
   });
 
   // Start timer mutation
   const startTimerMutation = useMutation({
-    mutationFn: (data) => api.post('/time/start', { ...data, project_id: id }),
+    mutationFn: (data) => api.post('/time/clock-in', { ...data, project_id: id }),
     onSuccess: () => {
-      toast.success('Timer started successfully');
+      toast.success(t('projects.timer.started'));
+      queryClient.invalidateQueries({ queryKey: ['active-time-entry'] });
     },
     onError: (error) => {
-      toast.error(error.response?.data?.message || 'Failed to start timer');
+      toast.error(error.response?.data?.message || t('projects.timer.startFailed'));
     },
   });
 
@@ -128,7 +134,7 @@ const ProjectDetail = () => {
   };
 
   const handleDeleteTask = (taskId) => {
-    if (window.confirm('Are you sure you want to delete this task?')) {
+    if (window.confirm(t('projects.task.confirm.delete'))) {
       deleteTaskMutation.mutate(taskId);
     }
   };
@@ -152,7 +158,7 @@ const ProjectDetail = () => {
 
   const handleStartTimer = (taskDescription = '') => {
     startTimerMutation.mutate({
-      task_description: taskDescription || `Working on ${project.name}`,
+      description: taskDescription || `${t('projects.workingOn')} ${project.name}`,
     });
   };
 
@@ -165,12 +171,15 @@ const ProjectDetail = () => {
   }
 
   if (error) {
-    return <ErrorMessage message="Failed to load project details" />;
+    return <ErrorMessage message={t('projects.detail.error.load')} />;
   }
 
   const statusConfig = STATUS_CONFIG[project.status] || STATUS_CONFIG.active;
-  const totalHours = timeEntries?.reduce((sum, entry) => sum + entry.duration, 0) || 0;
-  const totalCost = totalHours * (project.hourly_rate || 0);
+  const assigneeNames =
+    project.assigned_users?.map((u) => u.name) ??
+    (project.assigned_user ? [project.assigned_user.name] : []);
+  const totalHours = timeEntries?.reduce((sum, entry) => sum + (entry.duration_hours || 0) * 60, 0) || 0;
+  const totalCost = (totalHours / 60) * (project.hourly_rate || 0);
   const completedTasks = tasks?.filter(task => task.completed).length || 0;
   const totalTasks = tasks?.length || 0;
 
@@ -187,7 +196,7 @@ const ProjectDetail = () => {
           </Link>
           <div>
             <h1 className="text-3xl font-bold text-gray-900">{project.name}</h1>
-            <p className="text-gray-600">{project.client_name}</p>
+            <p className="text-gray-600">{project.client?.name}</p>
           </div>
         </div>
         <div className="flex items-center space-x-3">
@@ -199,7 +208,7 @@ const ProjectDetail = () => {
             className="btn-primary btn-md flex items-center"
           >
             <Play className="w-4 h-4 mr-2" />
-            Start Timer
+            {t('projects.detail.startTimer')}
           </button>
         </div>
       </div>
@@ -212,9 +221,9 @@ const ProjectDetail = () => {
               <Clock className="w-6 h-6 text-primary-600" />
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Total Hours</p>
+              <p className="text-sm font-medium text-gray-600">{t('projects.detail.totalHours')}</p>
               <p className="text-2xl font-bold text-gray-900">
-                {formatDuration(totalHours * 3600)}
+                {formatDuration(totalHours)}
               </p>
             </div>
           </div>
@@ -226,7 +235,7 @@ const ProjectDetail = () => {
               <DollarSign className="w-6 h-6 text-green-600" />
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Total Cost</p>
+              <p className="text-sm font-medium text-gray-600">{t('projects.detail.totalCost')}</p>
               <p className="text-2xl font-bold text-gray-900">
                 {formatCurrency(totalCost)}
               </p>
@@ -240,7 +249,7 @@ const ProjectDetail = () => {
               <CheckSquare className="w-6 h-6 text-blue-600" />
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Tasks</p>
+              <p className="text-sm font-medium text-gray-600">{t('projects.detail.tasks')}</p>
               <p className="text-2xl font-bold text-gray-900">
                 {completedTasks}/{totalTasks}
               </p>
@@ -254,9 +263,9 @@ const ProjectDetail = () => {
               <Calendar className="w-6 h-6 text-yellow-600" />
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Deadline</p>
+              <p className="text-sm font-medium text-gray-600">{t('projects.detail.deadline')}</p>
               <p className="text-lg font-bold text-gray-900">
-                {project.deadline ? formatDate(project.deadline, 'MMM d') : 'None'}
+                {project.due_date ? formatDate(project.due_date, 'MMM d') : t('projects.detail.none')}
               </p>
             </div>
           </div>
@@ -275,7 +284,7 @@ const ProjectDetail = () => {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              Overview
+              {t('projects.detail.overview')}
             </button>
             <button
               onClick={() => setActiveTab('tasks')}
@@ -285,7 +294,7 @@ const ProjectDetail = () => {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              Tasks ({totalTasks})
+              {t('projects.detail.tasks')} ({totalTasks})
             </button>
             <button
               onClick={() => setActiveTab('time')}
@@ -295,7 +304,7 @@ const ProjectDetail = () => {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              Time Entries
+              {t('projects.detail.timeEntries')}
             </button>
           </nav>
         </div>
@@ -305,30 +314,38 @@ const ProjectDetail = () => {
             <div className="space-y-6">
               {/* Project Details */}
               <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Project Details</h3>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">{t('projects.detail.title')}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <h4 className="text-sm font-medium text-gray-700 mb-2">Description</h4>
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">{t('projects.form.description')}</h4>
                     <p className="text-gray-900">
-                      {project.description || 'No description provided'}
+                      {project.description || t('projects.detail.noDescription')}
                     </p>
                   </div>
                   <div className="space-y-4">
                     <div>
-                      <h4 className="text-sm font-medium text-gray-700">Budget</h4>
+                      <h4 className="text-sm font-medium text-gray-700">{t('projects.detail.budget')}</h4>
                       <p className="text-gray-900">
-                        {project.budget ? formatCurrency(project.budget) : 'Not set'}
+                        {project.budget ? formatCurrency(project.budget) : t('projects.detail.notSet')}
                       </p>
                     </div>
                     <div>
-                      <h4 className="text-sm font-medium text-gray-700">Hourly Rate</h4>
+                      <h4 className="text-sm font-medium text-gray-700">{t('projects.form.hourlyRate')}</h4>
                       <p className="text-gray-900">
-                        {project.hourly_rate ? `${formatCurrency(project.hourly_rate)}/hr` : 'Not set'}
+                        {project.hourly_rate ? `${formatCurrency(project.hourly_rate)}/hr` : t('projects.detail.notSet')}
                       </p>
                     </div>
                     <div>
-                      <h4 className="text-sm font-medium text-gray-700">Priority</h4>
+                      <h4 className="text-sm font-medium text-gray-700">{t('projects.form.priority')}</h4>
                       <p className="text-gray-900 capitalize">{project.priority}</p>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-700">{t('projects.assignedTo')}</h4>
+                      <p className="text-gray-900">
+                        {assigneeNames.length > 0
+                          ? assigneeNames.join(', ')
+                          : t('projects.unassigned')}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -337,7 +354,7 @@ const ProjectDetail = () => {
               {/* Progress */}
               {project.budget && (
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Budget Progress</h3>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">{t('projects.detail.budgetProgress')}</h3>
                   <div className="bg-gray-200 rounded-full h-4">
                     <div 
                       className="bg-primary-600 h-4 rounded-full" 
@@ -347,8 +364,8 @@ const ProjectDetail = () => {
                     ></div>
                   </div>
                   <div className="flex justify-between text-sm text-gray-600 mt-2">
-                    <span>{formatCurrency(totalCost)} spent</span>
-                    <span>{formatCurrency(project.budget)} budget</span>
+                    <span>{formatCurrency(totalCost)} {t('projects.detail.spent')}</span>
+                    <span>{formatCurrency(project.budget)} {t('projects.detail.budgetLabel')}</span>
                   </div>
                 </div>
               )}
@@ -358,29 +375,41 @@ const ProjectDetail = () => {
           {activeTab === 'tasks' && (
             <div>
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-lg font-semibold text-gray-900">Tasks</h3>
-                <button
-                  onClick={() => openTaskModal()}
-                  className="btn-primary btn-md flex items-center"
-                >
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add Task
-                </button>
+                <h3 className="text-lg font-semibold text-gray-900">{t('projects.detail.tasks')}</h3>
+                {canManage && (
+                  <button
+                    onClick={() => openTaskModal()}
+                    className="btn-primary btn-md flex items-center"
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    {t('projects.task.add')}
+                  </button>
+                )}
               </div>
 
               <div className="space-y-3">
                 {tasks?.map((task) => (
                   <div key={task.id} className="flex items-center space-x-3 p-4 bg-gray-50 flex rounded-lg">
-                    <button
-                      onClick={() => handleToggleTask(task.id, task.completed)}
-                      className="flex-shrink-0"
-                    >
-                      {task.completed ? (
-                        <CheckSquare className="w-5 h-5 text-green-600" />
-                      ) : (
-                        <Square className="w-5 h-5 text-gray-400" />
-                      )}
-                    </button>
+                    {canManage ? (
+                      <button
+                        onClick={() => handleToggleTask(task.id, task.completed)}
+                        className="flex-shrink-0"
+                      >
+                        {task.completed ? (
+                          <CheckSquare className="w-5 h-5 text-green-600" />
+                        ) : (
+                          <Square className="w-5 h-5 text-gray-400" />
+                        )}
+                      </button>
+                    ) : (
+                      <span className="flex-shrink-0" aria-hidden="true">
+                        {task.completed ? (
+                          <CheckSquare className="w-5 h-5 text-green-600" />
+                        ) : (
+                          <Square className="w-5 h-5 text-gray-400" />
+                        )}
+                      </span>
+                    )}
                     <div className="flex-1">
                       <h4 className={`font-medium ${task.completed ? 'line-through text-gray-500' : 'text-gray-900'}`}>
                         {task.title}
@@ -390,7 +419,7 @@ const ProjectDetail = () => {
                       )}
                       {task.due_date && (
                         <p className="text-xs text-gray-500">
-                          Due: {formatDate(task.due_date, 'MMM d, yyyy')}
+                          {t('projects.due')}: {formatDate(task.due_date, 'MMM d, yyyy')}
                         </p>
                       )}
                     </div>
@@ -401,18 +430,22 @@ const ProjectDetail = () => {
                       >
                         <Play className="w-4 h-4" />
                       </button>
-                      <button
-                        onClick={() => openTaskModal(task)}
-                        className="p-2 text-gray-400 hover:text-primary-600"
-                      >
-                        <Edit className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteTask(task.id)}
-                        className="p-2 text-gray-400 hover:text-red-600"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {canManage && (
+                        <>
+                          <button
+                            onClick={() => openTaskModal(task)}
+                            className="p-2 text-gray-400 hover:text-primary-600"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteTask(task.id)}
+                            className="p-2 text-gray-400 hover:text-red-600"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -420,7 +453,7 @@ const ProjectDetail = () => {
                 {tasks?.length === 0 && (
                   <div className="text-center py-8">
                     <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-500">No tasks yet</p>
+                    <p className="text-gray-500">{t('projects.task.empty')}</p>
                   </div>
                 )}
               </div>
@@ -429,23 +462,23 @@ const ProjectDetail = () => {
 
           {activeTab === 'time' && (
             <div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-6">Time Entries</h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-6">{t('projects.detail.timeEntries')}</h3>
               
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50 flex">
+                  <thead className="bg-gray-50">
                     <tr>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Date
+                        {t('projects.table.date')}
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Task
+                        {t('projects.table.task')}
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Duration
+                        {t('projects.table.duration')}
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        User
+                        {t('projects.table.user')}
                       </th>
                     </tr>
                   </thead>
@@ -473,7 +506,7 @@ const ProjectDetail = () => {
               {timeEntries?.length === 0 && (
                 <div className="text-center py-8">
                   <Clock className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500">No time entries yet</p>
+                  <p className="text-gray-500">{t('projects.time.empty')}</p>
                 </div>
               )}
             </div>
@@ -485,15 +518,15 @@ const ProjectDetail = () => {
       <Modal
         isOpen={showTaskModal}
         onClose={() => setShowTaskModal(false)}
-        title={editingTask ? 'Edit Task' : 'Add Task'}
+        title={editingTask ? t('projects.task.editTitle') : t('projects.task.add')}
       >
         <form onSubmit={handleSubmit(handleAddTask)} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Task Title
+              {t('projects.task.title')}
             </label>
             <input
-              {...register('title', { required: 'Task title is required' })}
+              {...register('title', { required: t('projects.task.titleRequired') })}
               type="text"
               className={`input ${errors.title ? 'border-red-300' : ''}`}
             />
@@ -504,7 +537,7 @@ const ProjectDetail = () => {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Description
+              {t('projects.form.description')}
             </label>
             <textarea
               {...register('description')}
@@ -516,22 +549,22 @@ const ProjectDetail = () => {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Priority
+                {t('projects.form.priority')}
               </label>
               <select
                 {...register('priority')}
                 className="input"
               >
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="urgent">Urgent</option>
+                <option value="low">{t('projects.priority.low')}</option>
+                <option value="medium">{t('projects.priority.medium')}</option>
+                <option value="high">{t('projects.priority.high')}</option>
+                <option value="urgent">{t('projects.priority.urgent')}</option>
               </select>
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Due Date
+                {t('projects.form.dueDate')}
               </label>
               <input
                 {...register('due_date')}
@@ -547,7 +580,7 @@ const ProjectDetail = () => {
               onClick={() => setShowTaskModal(false)}
               className="btn-outline btn-md"
             >
-              Cancel
+              {t('projects.cancel')}
             </button>
             <button
               type="submit"
@@ -557,7 +590,7 @@ const ProjectDetail = () => {
               {(addTaskMutation.isPending || updateTaskMutation.isPending) ? (
                 <LoadingSpinner size="sm" color="white" />
               ) : (
-                editingTask ? 'Update Task' : 'Add Task'
+                editingTask ? t('projects.task.update') : t('projects.task.add')
               )}
             </button>
           </div>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { 
   Clock, 
@@ -8,20 +9,23 @@ import {
   TrendingUp, 
   Calendar,
   Play,
-  Pause,
-  Square,
   Timer
 } from 'lucide-react';
-import { useAuth } from '../../hooks/useAuth';
+import { useAuth } from '../../hooks/useAuth.jsx';
+import { useSettings } from '../../hooks/useSettings.jsx';
 import { api } from '../../services/api';
-import { formatCurrency, formatDuration, formatDate } from '../../utils/helpers';
+import { formatCurrency, formatDuration, formatDate, formatTimer } from '../../utils/helpers';
 import { USER_ROLES } from '../../utils/constants';
 import LoadingSpinner from '../Common/LoadingSpinner';
 import ErrorMessage from '../Common/ErrorMessage';
 
 const Dashboard = () => {
   const { user } = useAuth();
+  const { t } = useSettings();
+  const navigate = useNavigate();
   const [currentTime, setCurrentTime] = useState(new Date());
+
+  const canManage = [USER_ROLES.ADMIN, USER_ROLES.MANAGER, USER_ROLES.CONTRACTOR].includes(user?.role);
 
   // Update current time every second
   useEffect(() => {
@@ -42,8 +46,8 @@ const Dashboard = () => {
   // Fetch active time entry for current user
   const { data: activeTimeEntry } = useQuery({
     queryKey: ['active-time-entry'],
-    queryFn: () => api.get('/time/active').then(res => res.data),
-    refetchInterval: 1000, // Update every second for timer
+    queryFn: () => api.get('/time/active').then(res => res.data.active_entry),
+    refetchInterval: 30000,
   });
 
   if (isLoading) {
@@ -55,7 +59,7 @@ const Dashboard = () => {
   }
 
   if (error) {
-    return <ErrorMessage message="Failed to load dashboard data" />;
+    return <ErrorMessage message={t('dashboard.loadError')} />;
   }
 
   const stats = dashboardData?.stats || {};
@@ -77,7 +81,7 @@ const Dashboard = () => {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">
-            Welcome back, {user?.first_name}!
+            {t('dashboard.welcome')}, {user?.first_name}!
           </h1>
           <p className="mt-2 text-gray-600">
             {formatDate(currentTime, 'EEEE, MMMM d, yyyy')}
@@ -88,7 +92,7 @@ const Dashboard = () => {
             <div className="text-2xl font-mono font-bold text-gray-900">
               {currentTime.toLocaleTimeString()}
             </div>
-            <div className="text-sm text-gray-500">Current Time</div>
+            <div className="text-sm text-gray-500">{t('dashboard.currentTime')}</div>
           </div>
         </div>
       </div>
@@ -102,17 +106,17 @@ const Dashboard = () => {
                 <Timer className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold">Active Timer</h3>
+                <h3 className="text-lg font-semibold">{t('dashboard.activeTimer')}</h3>
                 <p className="text-primary-100">
-                  {activeTimeEntry.project_name} - {activeTimeEntry.task_description}
+                  {activeTimeEntry.project_name} - {activeTimeEntry.description}
                 </p>
               </div>
             </div>
             <div className="text-right">
               <div className="text-3xl font-mono font-bold">
-                {formatDuration(elapsedSeconds)}
+                {formatTimer(elapsedSeconds)}
               </div>
-              <div className="text-primary-100">Elapsed Time</div>
+              <div className="text-primary-100">{t('dashboard.elapsedTime')}</div>
             </div>
           </div>
         </div>
@@ -127,9 +131,9 @@ const Dashboard = () => {
               <Clock className="w-6 h-6 text-primary-600" />
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">This Week</p>
+              <p className="text-sm font-medium text-gray-600">{t('dashboard.thisWeek')}</p>
               <p className="text-2xl font-bold text-gray-900">
-                {formatDuration((stats.hoursThisWeek || 0) * 3600)}
+                {formatDuration((stats.hoursThisWeek || 0) * 60)}
               </p>
             </div>
           </div>
@@ -142,7 +146,7 @@ const Dashboard = () => {
               <FolderOpen className="w-6 h-6 text-secondary-600" />
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Active Projects</p>
+              <p className="text-sm font-medium text-gray-600">{t('dashboard.activeProjects')}</p>
               <p className="text-2xl font-bold text-gray-900">
                 {stats.activeProjects || 0}
               </p>
@@ -151,14 +155,14 @@ const Dashboard = () => {
         </div>
 
         {/* Clients (Admin/Manager only) */}
-        {[USER_ROLES.ADMIN, USER_ROLES.MANAGER].includes(user?.role) && (
+        {canManage && (
           <div className="bg-white rounded-lg shadow p-6 flex">
             <div className="flex items-center">
               <div className="p-3 bg-blue-100 rounded-full">
                 <Users className="w-6 h-6 text-blue-600" />
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Total Clients</p>
+                <p className="text-sm font-medium text-gray-600">{t('dashboard.totalClients')}</p>
                 <p className="text-2xl font-bold text-gray-900">
                   {stats.totalClients || 0}
                 </p>
@@ -168,14 +172,14 @@ const Dashboard = () => {
         )}
 
         {/* Revenue This Month (Admin/Manager only) */}
-        {[USER_ROLES.ADMIN, USER_ROLES.MANAGER].includes(user?.role) && (
+        {canManage && (
           <div className="bg-white rounded-lg shadow p-6 flex">
             <div className="flex items-center">
               <div className="p-3 bg-green-100 rounded-full">
                 <DollarSign className="w-6 h-6 text-green-600" />
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">This Month</p>
+                <p className="text-sm font-medium text-gray-600">{t('dashboard.thisMonth')}</p>
                 <p className="text-2xl font-bold text-gray-900">
                   {formatCurrency(stats.revenueThisMonth || 0)}
                 </p>
@@ -191,9 +195,9 @@ const Dashboard = () => {
               <TrendingUp className="w-6 h-6 text-yellow-600" />
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Today</p>
+              <p className="text-sm font-medium text-gray-600">{t('dashboard.today')}</p>
               <p className="text-2xl font-bold text-gray-900">
-                {formatDuration((stats.hoursToday || 0) * 3600)}
+                {formatDuration((stats.hoursToday || 0) * 60)}
               </p>
             </div>
           </div>
@@ -204,7 +208,7 @@ const Dashboard = () => {
         {/* Recent Activity */}
         <div className="bg-white rounded-lg shadow flex flex-col">
           <div className="p-6 border-b border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900">Recent Activity</h3>
+            <h3 className="text-lg font-semibold text-gray-900">{t('dashboard.recentActivity')}</h3>
           </div>
           <div className="p-6">
             {recentActivity.length > 0 ? (
@@ -225,7 +229,7 @@ const Dashboard = () => {
                       </p>
                       <p className="text-xs text-gray-400">
                         {formatDate(activity.start_time, 'MMM d, h:mm a')} - 
-                        {formatDuration(activity.duration)} hours
+                        {formatDuration(activity.duration)}
                       </p>
                     </div>
                   </div>
@@ -233,7 +237,7 @@ const Dashboard = () => {
               </div>
             ) : (
               <p className="text-gray-500 text-center py-4">
-                No recent activity
+                {t('dashboard.noRecentActivity')}
               </p>
             )}
           </div>
@@ -242,7 +246,7 @@ const Dashboard = () => {
         {/* Upcoming Deadlines */}
         <div className="bg-white rounded-lg shadow flex flex-col">
           <div className="p-6 border-b border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900">Upcoming Deadlines</h3>
+            <h3 className="text-lg font-semibold text-gray-900">{t('dashboard.upcomingDeadlines')}</h3>
           </div>
           <div className="p-6">
             {upcomingDeadlines.length > 0 ? (
@@ -262,7 +266,7 @@ const Dashboard = () => {
                         {deadline.client_name}
                       </p>
                       <p className="text-xs text-red-600">
-                        Due: {formatDate(deadline.deadline, 'MMM d, yyyy')}
+                        {t('dashboard.due')}: {formatDate(deadline.deadline, 'MMM d, yyyy')}
                       </p>
                     </div>
                   </div>
@@ -270,7 +274,7 @@ const Dashboard = () => {
               </div>
             ) : (
               <p className="text-gray-500 text-center py-4">
-                No upcoming deadlines
+                {t('dashboard.noUpcomingDeadlines')}
               </p>
             )}
           </div>
@@ -279,24 +283,40 @@ const Dashboard = () => {
 
       {/* Quick Actions */}
       <div className="bg-white rounded-lg shadow p-6 flex flex-col">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">{t('dashboard.quickActions')}</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <button className="btn-primary btn-md flex items-center justify-center">
+          <button
+            onClick={() => navigate('/time')}
+            className="btn-primary btn-md flex items-center justify-center"
+          >
             <Play className="w-4 h-4 mr-2" />
-            Start Timer
+            {t('dashboard.startTimer')}
           </button>
-          <button className="btn-secondary btn-md flex items-center justify-center">
-            <FolderOpen className="w-4 h-4 mr-2" />
-            New Project
-          </button>
-          <button className="btn-outline btn-md flex items-center justify-center">
-            <Users className="w-4 h-4 mr-2" />
-            Add Client
-          </button>
-          <button className="btn-outline btn-md flex items-center justify-center">
-            <DollarSign className="w-4 h-4 mr-2" />
-            Create Invoice
-          </button>
+          {canManage && (
+            <>
+              <button
+                onClick={() => navigate('/projects')}
+                className="btn-secondary btn-md flex items-center justify-center"
+              >
+                <FolderOpen className="w-4 h-4 mr-2" />
+                {t('dashboard.newProject')}
+              </button>
+              <button
+                onClick={() => navigate('/clients')}
+                className="btn-outline btn-md flex items-center justify-center"
+              >
+                <Users className="w-4 h-4 mr-2" />
+                {t('dashboard.addClient')}
+              </button>
+              <button
+                onClick={() => navigate('/billing')}
+                className="btn-outline btn-md flex items-center justify-center"
+              >
+                <DollarSign className="w-4 h-4 mr-2" />
+                {t('dashboard.createInvoice')}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

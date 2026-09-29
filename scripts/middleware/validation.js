@@ -93,8 +93,8 @@ const userValidations = {
       .withMessage('Last name is required and must be less than 50 characters'),
     body('role')
       .optional()
-      .isIn(Object.values(USER_ROLES))
-      .withMessage(`Role must be one of: ${Object.values(USER_ROLES).join(', ')}`),
+      .isIn([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR, USER_ROLES.MANAGER])
+      .withMessage('Role must be one of: employee, contractor, manager'),
     body('hourly_rate')
       .optional()
       .isFloat({ min: 0 })
@@ -112,7 +112,6 @@ const userValidations = {
   ],
   
   update: [
-    commonValidations.id,
     body('username')
       .optional()
       .isLength({ min: 3, max: 50 })
@@ -341,15 +340,25 @@ const invoiceValidations = {
       .isInt({ min: 1 })
       .withMessage('Project ID must be a positive integer'),
     body('issue_date')
+      .optional()
       .isISO8601()
-      .withMessage('Issue date is required and must be in ISO 8601 format'),
+      .withMessage('Issue date must be in ISO 8601 format'),
     body('due_date')
+      .optional()
       .isISO8601()
-      .withMessage('Due date is required and must be in ISO 8601 format'),
+      .withMessage('Due date must be in ISO 8601 format'),
     body('tax_rate')
       .optional()
       .isFloat({ min: 0, max: 100 })
       .withMessage('Tax rate must be between 0 and 100'),
+    body('discount_type')
+      .optional()
+      .isIn(['amount', 'percent'])
+      .withMessage('Discount type must be one of: amount, percent'),
+    body('discount_value')
+      .optional()
+      .isFloat({ min: 0 })
+      .withMessage('Discount value must be a non-negative number'),
     body('currency')
       .optional()
       .isLength({ min: 3, max: 3 })

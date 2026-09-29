@@ -16,20 +16,14 @@ const { DATE_FORMATS, TIME_LIMITS, CURRENCIES } = require('./constants');
  */
 const formatDate = (date, format = DATE_FORMATS.ISO_DATETIME) => {
   if (!date) return null;
+  // DATE-only columns are returned as 'YYYY-MM-DD' strings (see config/database
+  // dateStrings). They carry no time or zone, so emit them unchanged rather than
+  // running them through a timezone-aware format.
+  if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
+  // DATETIME/TIMESTAMP values are serialized with an explicit UTC offset so the
+  // browser converts them to the viewer's local time instead of parsing the
+  // server's wall-clock time as its own (which skewed timers by the TZ delta).
   return moment(date).format(format);
-};
-
-/**
- * Calculate duration between two dates in minutes
- * @param {Date|string} startTime - Start time
- * @param {Date|string} endTime - End time
- * @returns {number} Duration in minutes
- */
-const calculateDuration = (startTime, endTime) => {
-  if (!startTime || !endTime) return 0;
-  const start = moment(startTime);
-  const end = moment(endTime);
-  return end.diff(start, 'minutes');
 };
 
 /**
@@ -91,8 +85,8 @@ const isValidEmail = (email) => {
  * @returns {boolean} Is valid phone number
  */
 const isValidPhone = (phone) => {
-  const phoneRegex = /^[\+]?[1-9][\d]{0,15}$/;
-  return phoneRegex.test(phone.replace(/[\s\-\(\)]/g, ''));
+  const phoneRegex = /^[+]?[1-9][\d]{0,15}$/;
+  return phoneRegex.test(phone.replace(/[\s\-()]/g, ''));
 };
 
 /**
@@ -297,9 +291,41 @@ const retryWithBackoff = async (fn, maxRetries = 3, baseDelay = 1000) => {
   }
 };
 
+/**
+ * Build the SQL fragment that grants an employee access to a project.
+ *
+ * Canonical access rule for employees: the user is the project's lead
+ * (`assigned_to`), the project's creator (`created_by`), or has a row in
+ * project_assignments. Admin/manager behaviour is intentionally untouched.
+ *
+ * The fragment contains THREE `?` placeholders, all bound to the same user id,
+ * in this order:
+ *   1. the `assigned_to` comparison
+ *   2. the `created_by` comparison
+ *   3. the `project_assignments.user_id` subquery
+ * Callers must push the user id three times, in order.
+ *
+ * @param {string} alias - Table alias / name for the projects table (default 'p')
+ * @returns {string} SQL fragment wrapped in parentheses
+ */
+const employeeProjectAccess = (alias = 'p') =>
+  `(${alias}.assigned_to = ? OR ${alias}.created_by = ? OR EXISTS (SELECT 1 FROM project_assignments pa WHERE pa.project_id = ${alias}.id AND pa.user_id = ?))`;
+
+/**
+ * Add the three copies of a user id required by {@link employeeProjectAccess}
+ * to an existing parameter array.
+ *
+ * @param {Array} params - Parameter array to mutate
+ * @param {number|string} userId - User id to push three times
+ * @returns {Array} The same parameter array
+ */
+const pushEmployeeProjectAccessParams = (params, userId) => {
+  params.push(userId, userId, userId);
+  return params;
+};
+
 module.exports = {
   formatDate,
-  calculateDuration,
   minutesToHoursMinutes,
   formatDuration,
   calculateBillableAmount,
@@ -317,5 +343,7 @@ module.exports = {
   deepClone,
   removeEmptyValues,
   sleep,
-  retryWithBackoff
+  retryWithBackoff,
+  employeeProjectAccess,
+  pushEmployeeProjectAccessParams
 };

@@ -90,9 +90,10 @@ const handleMySQLError = (error) => {
   console.error('MySQL Error:', error);
   
   switch (error.code) {
-    case 'ER_DUP_ENTRY':
+    case 'ER_DUP_ENTRY': {
       const field = extractDuplicateField(error.message);
       return new ConflictError(`${field} already exists`);
+    }
       
     case 'ER_NO_REFERENCED_ROW_2':
       return new ValidationError('Referenced record does not exist');

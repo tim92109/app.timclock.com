@@ -17,7 +17,17 @@ const dbConfig = {
   connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT, 10) || 10,
   queueLimit: 0,
   charset: 'utf8mb4',
-  timezone: '+00:00'
+  // DATE-only columns (projects.start_date, invoices.due_date, ...) have no time
+  // or timezone component. Return them verbatim as 'YYYY-MM-DD' so the API never
+  // shifts them by a timezone offset. DATETIME/TIMESTAMP columns remain JS Dates
+  // and are serialized with an explicit UTC offset (see utils/helpers.formatDate).
+  dateStrings: ['DATE'],
+  // Use the server's local timezone. The MySQL session stores/returns timestamps
+  // in the host's local time (NOW(), current_timestamp()), and the Node process
+  // runs on the same host, so 'local' keeps JS Date <-> SQL conversion consistent.
+  // The previous '+00:00' made mysql2 read local timestamps as if they were UTC,
+  // shifting every timestamp by the host's UTC offset (e.g. a 6-hour timer skew).
+  timezone: 'local'
 };
 
 // Create connection pool
@@ -40,13 +50,20 @@ const testConnection = async () => {
 
 /**
  * Execute query with error handling
+ *
+ * Uses pool.query (client-side placeholder escaping) rather than pool.execute.
+ * mysql2's prepared-statement path rejects placeholders in LIMIT/OFFSET clauses
+ * with ER_WRONG_ARGUMENTS ("Incorrect arguments to mysqld_stmt_execute") on
+ * MySQL 8, which broke every paginated list endpoint. pool.query escapes the
+ * parameters safely and produces literal LIMIT/OFFSET values.
+ *
  * @param {string} query - SQL query
  * @param {Array} params - Query parameters
  * @returns {Promise} Query result
  */
 const executeQuery = async (query, params = []) => {
   try {
-    const [rows] = await pool.execute(query, params);
+    const [rows] = await pool.query(query, params);
     return rows;
   } catch (error) {
     console.error('Database query error:', error.message);
@@ -104,15 +121,6 @@ const closePool = async () => {
   } catch (error) {
     console.error('Error closing database pool:', error.message);
   }
-};
-
-module.exports = {
-  pool,
-  testConnection,
-  executeQuery,
-  executeTransaction,
-  getStats,
-  closePool
 };
 
 module.exports = {

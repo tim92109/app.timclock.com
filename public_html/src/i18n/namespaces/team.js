@@ -1,0 +1,43 @@
+const team = {
+  en: {
+    'team.title': 'Team',
+    'team.subtitle': 'Manage the employees assigned to your team',
+    'team.myTeam': 'My Team',
+    'team.available': 'Available Employees',
+    'team.employee': 'Employee',
+    'team.email': 'Email',
+    'team.role': 'Role',
+    'team.addToTeam': 'Add to team',
+    'team.remove': 'Remove',
+    'team.noTeam': 'No employees on your team yet.',
+    'team.noAvailable': 'No available employees.',
+    'team.addSuccess': 'Employee added to your team',
+    'team.addError': 'Failed to add employee to your team',
+    'team.removeSuccess': 'Employee removed from your team',
+    'team.removeError': 'Failed to remove employee from your team',
+    'team.confirmRemove': 'Are you sure you want to remove this employee from your team?',
+    'team.loadError': 'Failed to load team members',
+  },
+
+  es: {
+    'team.title': 'Equipo',
+    'team.subtitle': 'Administra los empleados asignados a tu equipo',
+    'team.myTeam': 'Mi equipo',
+    'team.available': 'Empleados disponibles',
+    'team.employee': 'Empleado',
+    'team.email': 'Correo electrónico',
+    'team.role': 'Rol',
+    'team.addToTeam': 'Agregar al equipo',
+    'team.remove': 'Quitar',
+    'team.noTeam': 'Aún no hay empleados en tu equipo.',
+    'team.noAvailable': 'No hay empleados disponibles.',
+    'team.addSuccess': 'Empleado agregado a tu equipo',
+    'team.addError': 'No se pudo agregar al empleado a tu equipo',
+    'team.removeSuccess': 'Empleado quitado de tu equipo',
+    'team.removeError': 'No se pudo quitar al empleado de tu equipo',
+    'team.confirmRemove': '¿Estás seguro de que quieres quitar a este empleado de tu equipo?',
+    'team.loadError': 'No se pudieron cargar los miembros del equipo',
+  },
+};
+
+export default team;

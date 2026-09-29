@@ -1,4 +1,4 @@
-# TimeClock API Server
+# TimClock API Server
 
 A comprehensive Node.js backend API server for time tracking, project management, client management, and billing operations.
 
@@ -115,11 +115,11 @@ A comprehensive Node.js backend API server for time tracking, project management
 - `POST /api/projects/:id/assign` - Assign user to project
 
 ### Time Entries
-- `GET /api/time-entries` - Get all time entries
-- `POST /api/time-entries/clock-in` - Clock in
-- `POST /api/time-entries/clock-out` - Clock out
-- `GET /api/time-entries/current` - Get current active entry
-- `POST /api/time-entries` - Create manual time entry
+- `GET /api/time` - Get all time entries
+- `POST /api/time/clock-in` - Clock in
+- `POST /api/time/clock-out` - Clock out
+- `GET /api/time/active` - Get current active entry
+- `POST /api/time` - Create manual time entry
 
 ### Billing
 - `GET /api/billing/invoices` - Get all invoices
@@ -196,11 +196,26 @@ pm2 restart timeclock-api
 ```
 
 ### Environment Variables
-Ensure all required environment variables are set in production:
+Production DB/JWT/session values are supplied by the host/pm2 environment, not
+by a committed `.env` file. Export `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`,
+`DB_PASSWORD`, `JWT_SECRET`, `SESSION_SECRET`, and `ALLOWED_ORIGINS` on the
+server before starting with PM2; the `env_production` block in
+`ecosystem.config.js` passes them through by name. Rotate all DB/JWT/session
+secrets before deploy and never reuse the development demo passwords.
+
+Also ensure these are set in production:
 - Database credentials
 - JWT secret (use a strong, unique secret)
 - CORS allowed origins
 - Rate limiting configuration
+
+### Demo Users (development only)
+`npm run seed-users` creates the demo accounts advertised on the login screen.
+It sources passwords from `SEED_ADMIN_PASSWORD`, `SEED_MANAGER_PASSWORD`, and
+`SEED_EMPLOYEE_PASSWORD` (falling back to the dev-only defaults), skips accounts
+that already exist, and refuses to run while `NODE_ENV=production` unless
+`--force` is passed. Production accounts must be provisioned through the
+application's registration/admin flows instead.
 
 ## Security Features
 
@@ -219,7 +234,10 @@ The application uses MySQL with the following main tables:
 - `projects` - Project management
 - `time_entries` - Time tracking records
 - `invoices` - Billing and invoicing
-- `project_assignments` - User-project relationships
+- `tasks` - Project tasks
+- `project_templates` - Reusable project templates
+- `payments` - Invoice payments
+- `billing_rates` - Billing rate definitions
 
 ## Health Check
 

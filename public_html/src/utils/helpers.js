@@ -1,4 +1,4 @@
-import { format, parseISO, isValid, differenceInMinutes, differenceInHours } from 'date-fns';
+import { format, parseISO, isValid, differenceInMinutes } from 'date-fns';
 import { DATE_FORMATS } from './constants';
 
 // Date formatting utilities
@@ -15,8 +15,8 @@ export const formatDate = (date, formatString = DATE_FORMATS.DISPLAY) => {
   }
 };
 
-export const formatDateTime = (date) => {
-  return formatDate(date, DATE_FORMATS.DISPLAY_WITH_TIME);
+export const formatDateTime = (date, formatString = DATE_FORMATS.DISPLAY_WITH_TIME) => {
+  return formatDate(date, formatString);
 };
 
 export const formatTime = (date) => {
@@ -29,11 +29,12 @@ export const formatDateForInput = (date) => {
 
 // Time duration utilities
 export const formatDuration = (minutes) => {
-  if (!minutes || minutes < 0) return '0h 0m';
-  
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  
+  const totalMinutes = Math.round(Number(minutes));
+  if (!totalMinutes || totalMinutes < 0) return '0h 0m';
+
+  const hours = Math.floor(totalMinutes / 60);
+  const mins = totalMinutes % 60;
+
   if (hours === 0) return `${mins}m`;
   if (mins === 0) return `${hours}h`;
   return `${hours}h ${mins}m`;
@@ -120,8 +121,8 @@ export const slugify = (text) => {
     .toString()
     .toLowerCase()
     .replace(/\s+/g, '-')
-    .replace(/[^\w\-]+/g, '')
-    .replace(/\-\-+/g, '-')
+    .replace(/[^\w-]+/g, '')
+    .replace(/--+/g, '-')
     .replace(/^-+/, '')
     .replace(/-+$/, '');
 };
@@ -157,6 +158,14 @@ export const removeEmptyValues = (obj) => {
   }, {});
 };
 
+export const sanitizeForm = (data, numericFields = []) => {
+  const cleaned = removeEmptyValues({ ...data });
+  numericFields.forEach((f) => {
+    if (cleaned[f] !== undefined && cleaned[f] !== null && cleaned[f] !== '') cleaned[f] = Number(cleaned[f]);
+  });
+  return cleaned;
+};
+
 export const deepClone = (obj) => {
   return JSON.parse(JSON.stringify(obj));
 };
@@ -168,8 +177,8 @@ export const isValidEmail = (email) => {
 };
 
 export const isValidPhone = (phone) => {
-  const phoneRegex = /^[\+]?[1-9][\d]{0,15}$/;
-  return phoneRegex.test(phone.replace(/[\s\-\(\)]/g, ''));
+  const phoneRegex = /^[+]?[1-9][\d]{0,15}$/;
+  return phoneRegex.test(phone.replace(/[\s\-()]/g, ''));
 };
 
 export const isValidUrl = (url) => {
@@ -316,6 +325,7 @@ export default {
   groupBy,
   sortBy,
   removeEmptyValues,
+  sanitizeForm,
   deepClone,
   isValidEmail,
   isValidPhone,

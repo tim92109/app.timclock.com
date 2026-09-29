@@ -16,14 +16,144 @@ const {
   API_RESPONSE,
   USER_ROLES,
   PROJECT_STATUS,
-  PROJECT_PRIORITY 
+  PROJECT_PRIORITY,
+  TASK_STATUS
 } = require('../utils/constants');
 const { 
   parsePagination, 
   buildPaginatedResponse,
   formatDate,
-  removeEmptyValues 
+  removeEmptyValues,
+  employeeProjectAccess,
+  pushEmployeeProjectAccessParams
 } = require('../utils/helpers');
+
+/**
+ * Normalize a list of user ids into unique, positive integers.
+ * @param {Array} userIds
+ * @returns {number[]}
+ */
+const normalizeUserIds = (userIds) => {
+  if (!Array.isArray(userIds)) return [];
+  const seen = new Set();
+  const result = [];
+  for (const raw of userIds) {
+    const id = Number(raw);
+    if (Number.isInteger(id) && id > 0 && !seen.has(id)) {
+      seen.add(id);
+      result.push(id);
+    }
+  }
+  return result;
+};
+
+/**
+ * Replace the assignment set for a project with the given user ids.
+ * Empty input clears all assignments; duplicates are ignored.
+ * @param {number|string} projectId
+ * @param {Array} userIds
+ * @returns {Promise<number[]>} The applied unique user ids
+ */
+const syncProjectAssignments = async (projectId, userIds) => {
+  const uniqueIds = normalizeUserIds(userIds);
+
+  await executeQuery('DELETE FROM project_assignments WHERE project_id = ?', [projectId]);
+
+  if (uniqueIds.length === 0) {
+    return uniqueIds;
+  }
+
+  const placeholders = uniqueIds.map(() => '(?, ?)').join(', ');
+  const insertParams = [];
+  for (const userId of uniqueIds) {
+    insertParams.push(projectId, userId);
+  }
+
+  await executeQuery(
+    `INSERT IGNORE INTO project_assignments (project_id, user_id) VALUES ${placeholders}`,
+    insertParams
+  );
+
+  return uniqueIds;
+};
+
+/**
+ * Fetch assignment rows for a set of projects in ONE query.
+ * @param {Array<number>} projectIds
+ * @returns {Promise<Map<number, Array<{id:number,name:string}>>>}
+ */
+const fetchAssignedUsersMap = async (projectIds) => {
+  const map = new Map();
+  if (!Array.isArray(projectIds) || projectIds.length === 0) {
+    return map;
+  }
+
+  const placeholders = projectIds.map(() => '?').join(', ');
+  const rows = await executeQuery(
+    `SELECT pa.project_id, u.id, u.first_name, u.last_name
+     FROM project_assignments pa
+     JOIN users u ON u.id = pa.user_id
+     WHERE pa.project_id IN (${placeholders})`,
+    projectIds
+  );
+
+  for (const row of rows) {
+    if (!map.has(row.project_id)) {
+      map.set(row.project_id, []);
+    }
+    map.get(row.project_id).push({
+      id: row.id,
+      name: `${row.first_name || ''} ${row.last_name || ''}`.trim()
+    });
+  }
+
+  return map;
+};
+
+/**
+ * Merge a project's assignment users with its lead assignee, deduped by id.
+ * @param {Array<{id:number,name:string}>} assignments
+ * @param {{id:number,name:string}|null} lead
+ * @returns {Array<{id:number,name:string}>}
+ */
+const buildAssignedUsers = (assignments, lead) => {
+  const list = Array.isArray(assignments) ? assignments.slice() : [];
+  if (lead && !list.some((user) => user.id === lead.id)) {
+    list.unshift({ id: lead.id, name: lead.name });
+  }
+  return list;
+};
+
+/**
+ * Load a project the caller is allowed to act on.
+ *
+ * Admin and manager are unrestricted (the project must still exist). Employees
+ * and contractors must satisfy {@link employeeProjectAccess}. Throws
+ * NotFoundError when the project does not exist or is not accessible to the
+ * caller, so resource ownership is never disclosed.
+ *
+ * @param {number|string} projectId
+ * @param {Object} req - Express request (for req.user)
+ * @param {string} columns - Project columns to select
+ * @returns {Promise<Object>} The accessible project row
+ */
+const loadAccessibleProject = async (projectId, req, columns = 'p.id') => {
+  let query = `SELECT ${columns} FROM projects p WHERE p.id = ? AND p.is_active = 1`;
+  const params = [projectId];
+
+  if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role)) {
+    query += ` AND ${employeeProjectAccess('p')}`;
+    pushEmployeeProjectAccessParams(params, req.user.id);
+  }
+
+  const rows = await executeQuery(query, params);
+
+  if (rows.length === 0) {
+    throw new NotFoundError('Project not found');
+  }
+
+  return rows[0];
+};
 
 /**
  * Get all projects with pagination and filtering
@@ -38,9 +168,9 @@ const getProjects = asyncHandler(async (req, res) => {
   const queryParams = [];
 
   // Role-based filtering
-  if (req.user.role === USER_ROLES.EMPLOYEE) {
-    whereConditions.push('p.assigned_to = ?');
-    queryParams.push(req.user.id);
+  if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role)) {
+    whereConditions.push(employeeProjectAccess('p'));
+    pushEmployeeProjectAccessParams(queryParams, req.user.id);
   } else if (req.user.role === USER_ROLES.MANAGER) {
     whereConditions.push('(p.assigned_to = ? OR p.created_by = ?)');
     queryParams.push(req.user.id, req.user.id);
@@ -103,8 +233,17 @@ const getProjects = asyncHandler(async (req, res) => {
 
   const projects = await executeQuery(projectsQuery, [...queryParams, limit, offset]);
 
+  // Fetch all assignment users for this page in a single query (avoid N+1).
+  const assignedUsersMap = await fetchAssignedUsersMap(projects.map((project) => project.id));
+
   // Format response
-  const formattedProjects = projects.map(project => ({
+  const formattedProjects = projects.map(project => {
+    const lead = project.assigned_user_id ? {
+      id: project.assigned_user_id,
+      name: `${project.assigned_first_name} ${project.assigned_last_name}`
+    } : null;
+
+    return {
     id: project.id,
     name: project.name,
     description: project.description,
@@ -123,16 +262,15 @@ const getProjects = asyncHandler(async (req, res) => {
       name: project.client_name,
       company: project.client_company
     },
-    assigned_user: project.assigned_user_id ? {
-      id: project.assigned_user_id,
-      name: `${project.assigned_first_name} ${project.assigned_last_name}`
-    } : null,
+    assigned_user: lead,
+    assigned_users: buildAssignedUsers(assignedUsersMap.get(project.id), lead),
     created_by: `${project.creator_first_name} ${project.creator_last_name}`,
     time_entries_count: project.time_entries_count || 0,
     total_hours: Math.round((project.total_minutes || 0) / 60 * 100) / 100,
     created_at: formatDate(project.created_at),
     updated_at: formatDate(project.updated_at)
-  }));
+    };
+  });
 
   const response = buildPaginatedResponse(formattedProjects, total, { page, limit });
 
@@ -171,9 +309,9 @@ const getProjectById = asyncHandler(async (req, res) => {
   const queryParams = [projectId];
 
   // Role-based access control
-  if (req.user.role === USER_ROLES.EMPLOYEE) {
-    projectQuery += ' AND p.assigned_to = ?';
-    queryParams.push(req.user.id);
+  if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role)) {
+    projectQuery += ` AND ${employeeProjectAccess('p')}`;
+    pushEmployeeProjectAccessParams(queryParams, req.user.id);
   } else if (req.user.role === USER_ROLES.MANAGER) {
     projectQuery += ' AND (p.assigned_to = ? OR p.created_by = ?)';
     queryParams.push(req.user.id, req.user.id);
@@ -212,6 +350,13 @@ const getProjectById = asyncHandler(async (req, res) => {
 
   const timeEntries = await executeQuery(timeEntriesQuery, [projectId]);
 
+  const assignedUsersMap = await fetchAssignedUsersMap([project.id]);
+  const leadAssignee = project.assigned_user_id ? {
+    id: project.assigned_user_id,
+    name: `${project.assigned_first_name} ${project.assigned_last_name}`,
+    email: project.assigned_email
+  } : null;
+
   res.json({
     status: API_RESPONSE.SUCCESS,
     data: {
@@ -238,28 +383,14 @@ const getProjectById = asyncHandler(async (req, res) => {
           company: project.client_company,
           hourly_rate: parseFloat(project.client_hourly_rate)
         },
-        assigned_user: project.assigned_user_id ? {
-          id: project.assigned_user_id,
-          name: `${project.assigned_first_name} ${project.assigned_last_name}`,
-          email: project.assigned_email
-        } : null,
+        assigned_user: leadAssignee,
+        assigned_users: buildAssignedUsers(assignedUsersMap.get(project.id), leadAssignee),
         created_by: `${project.creator_first_name} ${project.creator_last_name}`,
         template_name: project.template_name,
         created_at: formatDate(project.created_at),
         updated_at: formatDate(project.updated_at)
       },
-      tasks: tasks.map(task => ({
-        id: task.id,
-        name: task.name,
-        description: task.description,
-        status: task.status,
-        priority: task.priority,
-        estimated_hours: parseFloat(task.estimated_hours) || 0,
-        actual_hours: parseFloat(task.actual_hours) || 0,
-        due_date: formatDate(task.due_date),
-        completed_date: formatDate(task.completed_date),
-        created_at: formatDate(task.created_at)
-      })),
+      tasks: tasks.map(formatTask),
       recent_time_entries: timeEntries.map(entry => ({
         id: entry.id,
         description: entry.description,
@@ -291,13 +422,27 @@ const createProject = asyncHandler(async (req, res) => {
     start_date,
     due_date,
     assigned_to,
+    assigned_user_ids,
     priority = 'medium',
     notes
   } = req.body;
 
+  const assignmentIds = normalizeUserIds(assigned_user_ids);
+
+  // The lead stays in projects.assigned_to: explicit assigned_to wins, otherwise
+  // the first of the provided assignment ids, otherwise none.
+  const leadUserId = assigned_to || (assignmentIds.length > 0 ? assignmentIds[0] : null);
+
   // Verify client exists
-  const clientQuery = 'SELECT id, hourly_rate FROM clients WHERE id = ? AND is_active = 1';
-  const clients = await executeQuery(clientQuery, [client_id]);
+  let clientQuery = 'SELECT id, hourly_rate FROM clients WHERE id = ? AND is_active = 1';
+  const clientParams = [client_id];
+
+  if (req.user.role === USER_ROLES.CONTRACTOR) {
+    clientQuery += ' AND created_by = ?';
+    clientParams.push(req.user.id);
+  }
+
+  const clients = await executeQuery(clientQuery, clientParams);
   
   if (clients.length === 0) {
     throw new NotFoundError('Client not found');
@@ -337,11 +482,16 @@ const createProject = asyncHandler(async (req, res) => {
     billing_type,
     start_date || null,
     due_date || null,
-    assigned_to || null,
+    leadUserId || null,
     priority,
     notes || null,
     req.user.id
   ]);
+
+  // Project_assignments is the source of truth for the many-to-many set.
+  if (assignmentIds.length > 0) {
+    await syncProjectAssignments(result.insertId, assignmentIds);
+  }
 
   // Get the created project
   const projectQuery = `
@@ -401,9 +551,9 @@ const updateProject = asyncHandler(async (req, res) => {
   `;
   const queryParams = [projectId];
 
-  if (req.user.role === USER_ROLES.EMPLOYEE) {
-    existingQuery += ' AND assigned_to = ?';
-    queryParams.push(req.user.id);
+  if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role)) {
+    existingQuery += ` AND ${employeeProjectAccess('projects')}`;
+    pushEmployeeProjectAccessParams(queryParams, req.user.id);
   } else if (req.user.role === USER_ROLES.MANAGER) {
     existingQuery += ' AND (assigned_to = ? OR created_by = ?)';
     queryParams.push(req.user.id, req.user.id);
@@ -435,6 +585,22 @@ const updateProject = asyncHandler(async (req, res) => {
     // Set completion date when marking as complete
     if (updateData.status === 'complete') {
       updateData.completed_date = new Date().toISOString().split('T')[0];
+    }
+  }
+
+  // Replace the assignment set when the caller supplies assigned_user_ids
+  // (an empty array intentionally clears it). projects.assigned_to keeps acting
+  // as the lead: if the current lead is no longer in the set, move to the first
+  // remaining id (or NULL).
+  if (Array.isArray(updateData.assigned_user_ids)) {
+    const appliedIds = await syncProjectAssignments(projectId, updateData.assigned_user_ids);
+
+    if (updateData.assigned_to === undefined) {
+      let leadUserId = currentProject.assigned_to;
+      if (leadUserId === null || leadUserId === undefined || !appliedIds.includes(Number(leadUserId))) {
+        leadUserId = appliedIds.length > 0 ? appliedIds[0] : null;
+      }
+      updateData.assigned_to = leadUserId;
     }
   }
 
@@ -633,9 +799,15 @@ const assignUserToProject = asyncHandler(async (req, res) => {
     throw new NotFoundError('User not found');
   }
 
-  // Update project assignment
+  // Record the many-to-many assignment (idempotent), then promote to lead only
+  // when the project has no lead yet.
   await executeQuery(
-    'UPDATE projects SET assigned_to = ?, updated_at = NOW() WHERE id = ?',
+    'INSERT IGNORE INTO project_assignments (project_id, user_id, role) VALUES (?, ?, ?)',
+    [projectId, user_id, role]
+  );
+
+  await executeQuery(
+    'UPDATE projects SET assigned_to = ?, updated_at = NOW() WHERE id = ? AND assigned_to IS NULL',
     [user_id, projectId]
   );
 
@@ -671,15 +843,26 @@ const removeUserFromProject = asyncHandler(async (req, res) => {
     throw new NotFoundError('Project not found');
   }
 
-  if (projects[0].assigned_to != userId) {
-    throw new ValidationError('User is not assigned to this project');
-  }
-
-  // Remove assignment
+  // Delete the assignment row (idempotent: absent row is fine).
   await executeQuery(
-    'UPDATE projects SET assigned_to = NULL, updated_at = NOW() WHERE id = ?',
-    [projectId]
+    'DELETE FROM project_assignments WHERE project_id = ? AND user_id = ?',
+    [projectId, userId]
   );
+
+  // If the removed user was the lead, promote another remaining assignment or
+  // clear the lead.
+  if (String(projects[0].assigned_to) === String(userId)) {
+    const remaining = await executeQuery(
+      'SELECT user_id FROM project_assignments WHERE project_id = ? ORDER BY id ASC LIMIT 1',
+      [projectId]
+    );
+    const nextLead = remaining.length > 0 ? remaining[0].user_id : null;
+
+    await executeQuery(
+      'UPDATE projects SET assigned_to = ?, updated_at = NOW() WHERE id = ?',
+      [nextLead, projectId]
+    );
+  }
 
   res.json({
     status: API_RESPONSE.SUCCESS,
@@ -696,18 +879,16 @@ const getProjectUsers = asyncHandler(async (req, res) => {
 
   // Verify project exists and user has access
   let projectQuery = `
-    SELECT p.id, p.name, p.assigned_to,
-           u.id as user_id, u.first_name, u.last_name, u.email
+    SELECT p.id, p.name, p.assigned_to
     FROM projects p
-    LEFT JOIN users u ON p.assigned_to = u.id
     WHERE p.id = ? AND p.is_active = 1
   `;
   const queryParams = [projectId];
 
   // Role-based access control
-  if (req.user.role === USER_ROLES.EMPLOYEE) {
-    projectQuery += ' AND p.assigned_to = ?';
-    queryParams.push(req.user.id);
+  if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role)) {
+    projectQuery += ` AND ${employeeProjectAccess('p')}`;
+    pushEmployeeProjectAccessParams(queryParams, req.user.id);
   }
 
   const projects = await executeQuery(projectQuery, queryParams);
@@ -717,11 +898,28 @@ const getProjectUsers = asyncHandler(async (req, res) => {
   }
 
   const project = projects[0];
-  const assignedUser = project.user_id ? {
-    id: project.user_id,
-    name: `${project.first_name} ${project.last_name}`,
-    email: project.email
-  } : null;
+
+  // Distinct union of the lead assignee and every project_assignments user.
+  const users = await executeQuery(
+    `SELECT DISTINCT u.id, u.first_name, u.last_name, u.email
+     FROM users u
+     WHERE u.is_active = 1
+       AND (u.id = ? OR u.id IN (
+         SELECT pa.user_id FROM project_assignments pa WHERE pa.project_id = ?
+       ))
+     ORDER BY u.first_name ASC, u.last_name ASC`,
+    [project.assigned_to, projectId]
+  );
+
+  const formattedUsers = users.map(user => ({
+    id: user.id,
+    first_name: user.first_name,
+    last_name: user.last_name,
+    email: user.email,
+    name: `${user.first_name || ''} ${user.last_name || ''}`.trim()
+  }));
+
+  const assignedUser = formattedUsers.find(user => user.id === project.assigned_to) || null;
 
   res.json({
     status: API_RESPONSE.SUCCESS,
@@ -730,7 +928,8 @@ const getProjectUsers = asyncHandler(async (req, res) => {
         id: project.id,
         name: project.name
       },
-      assigned_user: assignedUser
+      assigned_user: assignedUser,
+      users: formattedUsers
     }
   });
 });
@@ -750,9 +949,9 @@ const getProjectTimeEntries = asyncHandler(async (req, res) => {
   `;
   const accessParams = [projectId];
 
-  if (req.user.role === USER_ROLES.EMPLOYEE) {
-    accessQuery += ' AND assigned_to = ?';
-    accessParams.push(req.user.id);
+  if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role)) {
+    accessQuery += ` AND ${employeeProjectAccess('projects')}`;
+    pushEmployeeProjectAccessParams(accessParams, req.user.id);
   }
 
   const projectAccess = await executeQuery(accessQuery, accessParams);
@@ -817,9 +1016,9 @@ const getProjectStats = asyncHandler(async (req, res) => {
   `;
   const queryParams = [projectId];
 
-  if (req.user.role === USER_ROLES.EMPLOYEE) {
-    projectQuery += ' AND assigned_to = ?';
-    queryParams.push(req.user.id);
+  if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role)) {
+    projectQuery += ` AND ${employeeProjectAccess('projects')}`;
+    pushEmployeeProjectAccessParams(queryParams, req.user.id);
   }
 
   const projects = await executeQuery(projectQuery, queryParams);
@@ -865,18 +1064,12 @@ const updateProjectStatus = asyncHandler(async (req, res) => {
     throw new ValidationError('Status is required');
   }
 
-  // Verify project exists
-  const projectQuery = `
-    SELECT id, status as current_status FROM projects
-    WHERE id = ? AND is_active = 1
-  `;
-  const projects = await executeQuery(projectQuery, [projectId]);
-  
-  if (projects.length === 0) {
-    throw new NotFoundError('Project not found');
-  }
-
-  const currentProject = projects[0];
+  // Verify project exists and the caller has access
+  const currentProject = await loadAccessibleProject(
+    projectId,
+    req,
+    'p.id, p.status as current_status'
+  );
 
   // Validate status transition
   const validStatuses = Object.values(PROJECT_STATUS);
@@ -936,8 +1129,15 @@ const createProjectFromTemplate = asyncHandler(async (req, res) => {
   const template = templates[0];
 
   // Verify client exists
-  const clientQuery = 'SELECT id, hourly_rate FROM clients WHERE id = ? AND is_active = 1';
-  const clients = await executeQuery(clientQuery, [client_id]);
+  let clientQuery = 'SELECT id, hourly_rate FROM clients WHERE id = ? AND is_active = 1';
+  const clientParams = [client_id];
+
+  if (req.user.role === USER_ROLES.CONTRACTOR) {
+    clientQuery += ' AND created_by = ?';
+    clientParams.push(req.user.id);
+  }
+
+  const clients = await executeQuery(clientQuery, clientParams);
   
   if (clients.length === 0) {
     throw new NotFoundError('Client not found');
@@ -988,9 +1188,9 @@ const getProjectTasks = asyncHandler(async (req, res) => {
   `;
   const accessParams = [projectId];
 
-  if (req.user.role === USER_ROLES.EMPLOYEE) {
-    accessQuery += ' AND assigned_to = ?';
-    accessParams.push(req.user.id);
+  if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role)) {
+    accessQuery += ` AND ${employeeProjectAccess('projects')}`;
+    pushEmployeeProjectAccessParams(accessParams, req.user.id);
   }
 
   const projectAccess = await executeQuery(accessQuery, accessParams);
@@ -1012,19 +1212,202 @@ const getProjectTasks = asyncHandler(async (req, res) => {
   res.json({
     status: API_RESPONSE.SUCCESS,
     data: {
-      tasks: tasks.map(task => ({
-        id: task.id,
-        name: task.name,
-        description: task.description,
-        status: task.status,
-        priority: task.priority,
-        estimated_hours: parseFloat(task.estimated_hours) || 0,
-        actual_hours: parseFloat(task.actual_hours) || 0,
-        due_date: formatDate(task.due_date),
-        completed_date: formatDate(task.completed_date),
-        created_at: formatDate(task.created_at)
-      }))
+      tasks: tasks.map(formatTask)
     }
+  });
+});
+
+const formatTask = (task) => ({
+  id: task.id,
+  name: task.name,
+  title: task.name,
+  description: task.description,
+  status: task.status,
+  priority: task.priority,
+  estimated_hours: parseFloat(task.estimated_hours) || 0,
+  actual_hours: parseFloat(task.actual_hours) || 0,
+  assigned_to: task.assigned_to,
+  due_date: formatDate(task.due_date),
+  completed_date: formatDate(task.completed_date),
+  completed: task.status === TASK_STATUS.COMPLETED,
+  created_at: formatDate(task.created_at)
+});
+
+const TASK_SELECT = `
+  SELECT id, name, description, status, priority, estimated_hours,
+         actual_hours, assigned_to, due_date, completed_date, created_at
+  FROM tasks
+`;
+
+/**
+ * Create a task for a project
+ * POST /api/projects/:id/tasks
+ */
+const createTask = asyncHandler(async (req, res) => {
+  const projectId = req.params.id;
+  const {
+    name,
+    title,
+    description,
+    status,
+    priority,
+    estimated_hours,
+    assigned_to,
+    due_date
+  } = req.body;
+
+  const taskName = name || title;
+
+  if (!taskName) {
+    throw new ValidationError('Task name is required');
+  }
+
+  // Verify project exists and the caller has access before touching the task
+  await loadAccessibleProject(projectId, req);
+
+  const result = await executeQuery(
+    `INSERT INTO tasks (project_id, name, description, status, priority, estimated_hours, assigned_to, due_date, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+    [
+      projectId,
+      taskName,
+      description || null,
+      status || TASK_STATUS.PENDING,
+      priority || PROJECT_PRIORITY.MEDIUM,
+      estimated_hours || null,
+      assigned_to || req.user.id,
+      due_date || null,
+      req.user.id
+    ]
+  );
+
+  const tasks = await executeQuery(`${TASK_SELECT} WHERE id = ?`, [result.insertId]);
+
+  res.status(HTTP_STATUS.CREATED).json({
+    status: API_RESPONSE.SUCCESS,
+    message: 'Task created successfully',
+    data: { task: formatTask(tasks[0]) }
+  });
+});
+
+/**
+ * Update a task
+ * PUT /api/projects/:id/tasks/:taskId
+ *
+ * Accepts either the API's native fields (name, status) or the UI's
+ * convenience fields (title, completed).
+ */
+const updateTask = asyncHandler(async (req, res) => {
+  const { id: projectId, taskId } = req.params;
+  const {
+    name,
+    title,
+    description,
+    status,
+    priority,
+    estimated_hours,
+    assigned_to,
+    due_date,
+    completed
+  } = req.body;
+
+  // Verify project access before touching the task
+  await loadAccessibleProject(projectId, req);
+
+  const existing = await executeQuery(
+    'SELECT id, status FROM tasks WHERE id = ? AND project_id = ?',
+    [taskId, projectId]
+  );
+
+  if (existing.length === 0) {
+    throw new NotFoundError('Task not found');
+  }
+
+  const updateFields = [];
+  const updateValues = [];
+
+  const nextName = name || title;
+  if (nextName !== undefined) {
+    updateFields.push('name = ?');
+    updateValues.push(nextName);
+  }
+  if (description !== undefined) {
+    updateFields.push('description = ?');
+    updateValues.push(description || null);
+  }
+  if (priority !== undefined) {
+    updateFields.push('priority = ?');
+    updateValues.push(priority);
+  }
+  if (estimated_hours !== undefined) {
+    updateFields.push('estimated_hours = ?');
+    updateValues.push(estimated_hours || null);
+  }
+  if (assigned_to !== undefined) {
+    updateFields.push('assigned_to = ?');
+    updateValues.push(assigned_to || null);
+  }
+  if (due_date !== undefined) {
+    updateFields.push('due_date = ?');
+    updateValues.push(due_date || null);
+  }
+
+  let nextStatus = status;
+  if (nextStatus === undefined && completed !== undefined) {
+    nextStatus = completed ? TASK_STATUS.COMPLETED : TASK_STATUS.PENDING;
+  }
+  if (nextStatus !== undefined) {
+    updateFields.push('status = ?');
+    updateValues.push(nextStatus);
+    updateFields.push('completed_date = ?');
+    updateValues.push(nextStatus === TASK_STATUS.COMPLETED ? new Date().toISOString().split('T')[0] : null);
+  }
+
+  if (updateFields.length === 0) {
+    throw new ValidationError('No valid fields provided for update');
+  }
+
+  updateFields.push('updated_at = NOW()');
+  updateValues.push(taskId, projectId);
+
+  await executeQuery(
+    `UPDATE tasks SET ${updateFields.join(', ')} WHERE id = ? AND project_id = ?`,
+    updateValues
+  );
+
+  const tasks = await executeQuery(`${TASK_SELECT} WHERE id = ?`, [taskId]);
+
+  res.json({
+    status: API_RESPONSE.SUCCESS,
+    message: 'Task updated successfully',
+    data: { task: formatTask(tasks[0]) }
+  });
+});
+
+/**
+ * Delete a task
+ * DELETE /api/projects/:id/tasks/:taskId
+ */
+const deleteTask = asyncHandler(async (req, res) => {
+  const { id: projectId, taskId } = req.params;
+
+  // Verify project access before touching the task
+  await loadAccessibleProject(projectId, req);
+
+  const existing = await executeQuery(
+    'SELECT id FROM tasks WHERE id = ? AND project_id = ?',
+    [taskId, projectId]
+  );
+
+  if (existing.length === 0) {
+    throw new NotFoundError('Task not found');
+  }
+
+  await executeQuery('DELETE FROM tasks WHERE id = ?', [taskId]);
+
+  res.json({
+    status: API_RESPONSE.SUCCESS,
+    message: 'Task deleted successfully'
   });
 });
 
@@ -1042,5 +1425,8 @@ module.exports = {
   updateProjectStatus,
   getProjectTemplates,
   createProjectFromTemplate,
-  getProjectTasks
+  getProjectTasks,
+  createTask,
+  updateTask,
+  deleteTask
 };

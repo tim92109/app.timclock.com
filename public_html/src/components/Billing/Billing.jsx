@@ -5,29 +5,40 @@ import {
   DollarSign, 
   Plus, 
   Search, 
-  Filter,
   Download,
   Send,
-  Eye,
-  Edit,
   Trash2,
   FileText,
-  Calendar,
   CheckCircle,
   Clock,
-  AlertCircle
+  AlertCircle,
+  Eye
 } from 'lucide-react';
 import { api } from '../../services/api';
-import { formatCurrency, formatDate } from '../../utils/helpers';
-import { INVOICE_STATUSES } from '../../utils/constants';
+import { useSettings } from '../../hooks/useSettings.jsx';
+import { useAuth } from '../../hooks/useAuth.jsx';
+import { formatCurrency, formatDate, formatNumber, sanitizeForm } from '../../utils/helpers';
+import { INVOICE_STATUSES, USER_ROLES } from '../../utils/constants';
 import LoadingSpinner from '../Common/LoadingSpinner';
 import ErrorMessage from '../Common/ErrorMessage';
 import Modal from '../Common/Modal';
 import toast from 'react-hot-toast';
 
+const STATUS_LABEL_KEYS = {
+  draft: 'billing.statusDraft',
+  sent: 'billing.statusSent',
+  paid: 'billing.statusPaid',
+  overdue: 'billing.statusOverdue',
+};
+
 const Billing = () => {
+  const { t } = useSettings();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
+  const canManage = [USER_ROLES.ADMIN, USER_ROLES.MANAGER, USER_ROLES.CONTRACTOR].includes(user?.role);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [viewInvoiceId, setViewInvoiceId] = useState(null);
+  const showViewModal = Boolean(viewInvoiceId);
   const [searchTerm, setSearchTerm] = useState('');
   const [filters, setFilters] = useState({
     status: '',
@@ -49,6 +60,13 @@ const Billing = () => {
     },
   });
 
+  // Fetch a single invoice for the view/preview modal
+  const { data: invoiceDetail, isLoading: isLoadingInvoice } = useQuery({
+    queryKey: ['invoice', viewInvoiceId],
+    queryFn: () => api.get(`/billing/invoices/${viewInvoiceId}`).then(res => res.data),
+    enabled: Boolean(viewInvoiceId),
+  });
+
   // Fetch clients for dropdown
   const { data: clients } = useQuery({
     queryKey: ['clients'],
@@ -61,6 +79,13 @@ const Billing = () => {
     queryFn: () => api.get('/projects').then(res => res.data),
   });
 
+  // Fetch projects with unbilled time for the estimate helper
+  const { data: billableProjects } = useQuery({
+    queryKey: ['billable-projects'],
+    queryFn: () => api.get('/billing/billable-projects').then(res => res.data),
+    enabled: canManage,
+  });
+
   // Fetch billing summary
   const { data: billingSummary } = useQuery({
     queryKey: ['billing-summary'],
@@ -71,14 +96,15 @@ const Billing = () => {
   const createInvoiceMutation = useMutation({
     mutationFn: (data) => api.post('/billing/invoices', data),
     onSuccess: () => {
-      toast.success('Invoice created successfully');
-      queryClient.invalidateQueries(['invoices']);
-      queryClient.invalidateQueries(['billing-summary']);
+      toast.success(t('billing.toastCreated'));
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['billing-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['billable-projects'] });
       setShowCreateModal(false);
       reset();
     },
     onError: (error) => {
-      toast.error(error.response?.data?.message || 'Failed to create invoice');
+      toast.error(error.response?.data?.message || t('billing.toastCreateFailed'));
     },
   });
 
@@ -86,11 +112,11 @@ const Billing = () => {
   const sendInvoiceMutation = useMutation({
     mutationFn: (id) => api.post(`/billing/invoices/${id}/send`),
     onSuccess: () => {
-      toast.success('Invoice sent successfully');
-      queryClient.invalidateQueries(['invoices']);
+      toast.success(t('billing.toastSent'));
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
     },
     onError: (error) => {
-      toast.error(error.response?.data?.message || 'Failed to send invoice');
+      toast.error(error.response?.data?.message || t('billing.toastSendFailed'));
     },
   });
 
@@ -98,12 +124,12 @@ const Billing = () => {
   const markPaidMutation = useMutation({
     mutationFn: (id) => api.post(`/billing/invoices/${id}/mark-paid`),
     onSuccess: () => {
-      toast.success('Invoice marked as paid');
-      queryClient.invalidateQueries(['invoices']);
-      queryClient.invalidateQueries(['billing-summary']);
+      toast.success(t('billing.toastPaid'));
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['billing-summary'] });
     },
     onError: (error) => {
-      toast.error(error.response?.data?.message || 'Failed to mark invoice as paid');
+      toast.error(error.response?.data?.message || t('billing.toastPaidFailed'));
     },
   });
 
@@ -111,45 +137,99 @@ const Billing = () => {
   const deleteInvoiceMutation = useMutation({
     mutationFn: (id) => api.delete(`/billing/invoices/${id}`),
     onSuccess: () => {
-      toast.success('Invoice deleted successfully');
-      queryClient.invalidateQueries(['invoices']);
-      queryClient.invalidateQueries(['billing-summary']);
+      toast.success(t('billing.toastDeleted'));
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['billing-summary'] });
     },
     onError: (error) => {
-      toast.error(error.response?.data?.message || 'Failed to delete invoice');
+      toast.error(error.response?.data?.message || t('billing.toastDeleteFailed'));
     },
   });
 
   // Form for creating invoices
-  const { register, handleSubmit, formState: { errors }, reset, watch } = useForm();
+  const { register, handleSubmit, formState: { errors }, reset, watch } = useForm({
+    defaultValues: { discount_type: 'amount' },
+  });
 
   const selectedClientId = watch('client_id');
+  const selectedProjectId = watch('project_id');
+
+  const billableProjectsList = Array.isArray(billableProjects)
+    ? billableProjects
+    : billableProjects?.projects ?? [];
+
+  const selectedBillableProject = selectedProjectId
+    ? billableProjectsList.find(project => project.id === parseInt(selectedProjectId, 10))
+    : null;
+
+  // Live (client-side) totals preview for the create modal
+  const watchedAmount = watch('amount');
+  const watchedDiscountType = watch('discount_type');
+  const watchedDiscountValue = watch('discount_value');
+  const watchedTaxRate = watch('tax_rate');
+
+  const previewBaseSubtotal = (() => {
+    if (watchedAmount !== '' && watchedAmount !== null && watchedAmount !== undefined) {
+      const parsedAmount = Number(watchedAmount);
+      if (!Number.isNaN(parsedAmount)) return parsedAmount;
+    }
+    const unbilled = Number(selectedBillableProject?.unbilled_amount);
+    return Number.isNaN(unbilled) ? 0 : unbilled;
+  })();
+
+  const previewDiscountValue = Number(watchedDiscountValue) || 0;
+  const rawDiscount = watchedDiscountType === 'percent'
+    ? (previewBaseSubtotal * previewDiscountValue) / 100
+    : previewDiscountValue;
+  const previewDiscount = Number.isNaN(rawDiscount)
+    ? 0
+    : Math.min(Math.max(rawDiscount, 0), previewBaseSubtotal);
+  const previewTaxable = previewBaseSubtotal - previewDiscount;
+  const previewTaxRate = Number(watchedTaxRate) || 0;
+  const previewTax = (previewTaxable * previewTaxRate) / 100;
+  const previewTotal = previewTaxable + previewTax;
 
   const handleCreateInvoice = (data) => {
-    createInvoiceMutation.mutate(data);
+    createInvoiceMutation.mutate(
+      sanitizeForm(data, ['client_id', 'project_id', 'amount', 'discount_value', 'tax_rate'])
+    );
   };
 
   const handleSendInvoice = (id) => {
-    if (window.confirm('Are you sure you want to send this invoice?')) {
+    if (window.confirm(t('billing.confirmSend'))) {
       sendInvoiceMutation.mutate(id);
     }
   };
 
   const handleMarkPaid = (id) => {
-    if (window.confirm('Mark this invoice as paid?')) {
+    if (window.confirm(t('billing.confirmMarkPaid'))) {
       markPaidMutation.mutate(id);
     }
   };
 
   const handleDeleteInvoice = (id) => {
-    if (window.confirm('Are you sure you want to delete this invoice? This action cannot be undone.')) {
+    if (window.confirm(t('billing.confirmDelete'))) {
       deleteInvoiceMutation.mutate(id);
     }
   };
 
-  const downloadInvoice = (id) => {
-    window.open(`/api/billing/invoices/${id}/download`, '_blank');
+  const downloadInvoice = async (id) => {
+    try {
+      const res = await api.get(`/billing/invoices/${id}/download`, { responseType: 'blob' });
+      const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `invoice-${id}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (error) {
+      toast.error(error.response?.data?.message || t('billing.downloadError'));
+    }
   };
+
+  const getStatusLabel = (status) => t(STATUS_LABEL_KEYS[status], status);
 
   const getStatusIcon = (status) => {
     switch (status) {
@@ -183,12 +263,12 @@ const Billing = () => {
   }
 
   if (error) {
-    return <ErrorMessage message="Failed to load billing data" />;
+    return <ErrorMessage message={t('billing.loadError')} />;
   }
 
   // Filter projects by selected client
   const filteredProjects = selectedClientId 
-    ? projects?.filter(project => project.client_id === parseInt(selectedClientId))
+    ? projects?.filter(project => project.client?.id === parseInt(selectedClientId, 10))
     : projects;
 
   return (
@@ -196,17 +276,19 @@ const Billing = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Billing & Invoices</h1>
-          <p className="mt-2 text-gray-600">Manage invoices and track payments</p>
+          <h1 className="text-3xl font-bold text-gray-900">{t('billing.title')}</h1>
+          <p className="mt-2 text-gray-600">{t('billing.subtitle')}</p>
         </div>
         <div className="mt-4 sm:mt-0">
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="btn-primary btn-md flex items-center"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Create Invoice
-          </button>
+          {canManage && (
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="btn-primary btn-md flex items-center"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              {t('billing.createInvoice')}
+            </button>
+          )}
         </div>
       </div>
 
@@ -219,7 +301,7 @@ const Billing = () => {
                 <DollarSign className="w-6 h-6 text-green-600" />
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Total Revenue</p>
+                <p className="text-sm font-medium text-gray-600">{t('billing.totalRevenue')}</p>
                 <p className="text-2xl font-bold text-gray-900">
                   {formatCurrency(billingSummary.totalRevenue || 0)}
                 </p>
@@ -233,7 +315,7 @@ const Billing = () => {
                 <Clock className="w-6 h-6 text-blue-600" />
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Pending</p>
+                <p className="text-sm font-medium text-gray-600">{t('billing.pending')}</p>
                 <p className="text-2xl font-bold text-gray-900">
                   {formatCurrency(billingSummary.pendingAmount || 0)}
                 </p>
@@ -247,7 +329,7 @@ const Billing = () => {
                 <AlertCircle className="w-6 h-6 text-red-600" />
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Overdue</p>
+                <p className="text-sm font-medium text-gray-600">{t('billing.overdue')}</p>
                 <p className="text-2xl font-bold text-gray-900">
                   {formatCurrency(billingSummary.overdueAmount || 0)}
                 </p>
@@ -261,7 +343,7 @@ const Billing = () => {
                 <FileText className="w-6 h-6 text-primary-600" />
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Total Invoices</p>
+                <p className="text-sm font-medium text-gray-600">{t('billing.totalInvoices')}</p>
                 <p className="text-2xl font-bold text-gray-900">
                   {billingSummary.totalInvoices || 0}
                 </p>
@@ -279,7 +361,7 @@ const Billing = () => {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
               <input
                 type="text"
-                placeholder="Search invoices..."
+                placeholder={t('billing.searchInvoices')}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="input pl-10"
@@ -292,10 +374,10 @@ const Billing = () => {
               onChange={(e) => setFilters({ ...filters, status: e.target.value })}
               className="input"
             >
-              <option value="">All Statuses</option>
+              <option value="">{t('billing.allStatuses')}</option>
               {Object.entries(INVOICE_STATUSES).map(([key, value]) => (
                 <option key={key} value={value}>
-                  {value.charAt(0).toUpperCase() + value.slice(1)}
+                  {getStatusLabel(value)}
                 </option>
               ))}
             </select>
@@ -306,7 +388,7 @@ const Billing = () => {
               onChange={(e) => setFilters({ ...filters, clientId: e.target.value })}
               className="input"
             >
-              <option value="">All Clients</option>
+              <option value="">{t('billing.allClients')}</option>
               {clients?.map((client) => (
                 <option key={client.id} value={client.id}>
                   {client.name}
@@ -320,7 +402,7 @@ const Billing = () => {
               value={filters.startDate}
               onChange={(e) => setFilters({ ...filters, startDate: e.target.value })}
               className="input"
-              placeholder="Start Date"
+              placeholder={t('billing.startDate')}
             />
           </div>
         </div>
@@ -329,32 +411,32 @@ const Billing = () => {
       {/* Invoices Table */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">Invoices</h3>
+          <h3 className="text-lg font-semibold text-gray-900">{t('billing.invoices')}</h3>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50 flex">
+            <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Invoice
+                  {t('billing.invoice')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Client
+                  {t('billing.client')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Amount
+                  {t('billing.amount')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
+                  {t('billing.status')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Date
+                  {t('billing.date')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Due Date
+                  {t('billing.dueDate')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
+                  {t('billing.actions')}
                 </th>
               </tr>
             </thead>
@@ -363,7 +445,7 @@ const Billing = () => {
                 const statusConfig = getStatusConfig(invoice.status);
                 
                 return (
-                  <tr key={invoice.id} className="hover:bg-gray-50 hover:flex">
+                  <tr key={invoice.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
                         {getStatusIcon(invoice.status)}
@@ -371,23 +453,23 @@ const Billing = () => {
                           <div className="text-sm font-medium text-gray-900">
                             #{invoice.invoice_number}
                           </div>
-                          {invoice.project_name && (
+                          {invoice.project?.name && (
                             <div className="text-sm text-gray-500">
-                              {invoice.project_name}
+                              {invoice.project?.name}
                             </div>
                           )}
                         </div>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {invoice.client_name}
+                      {invoice.client?.name}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {formatCurrency(invoice.amount)}
+                      {formatCurrency(invoice.total_amount)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusConfig.bgColor} ${statusConfig.textColor}`}>
-                        {invoice.status}
+                        {getStatusLabel(invoice.status)}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
@@ -399,40 +481,52 @@ const Billing = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <div className="flex items-center space-x-2">
                         <button
-                          onClick={() => downloadInvoice(invoice.id)}
+                          onClick={() => setViewInvoiceId(invoice.id)}
                           className="text-gray-400 hover:text-gray-600"
-                          title="Download"
+                          title={t('billing.viewInvoice')}
                         >
-                          <Download className="w-4 h-4" />
+                          <Eye className="w-4 h-4" />
                         </button>
-                        
-                        {invoice.status === 'draft' && (
-                          <button
-                            onClick={() => handleSendInvoice(invoice.id)}
-                            className="text-blue-600 hover:text-blue-900"
-                            title="Send Invoice"
-                          >
-                            <Send className="w-4 h-4" />
-                          </button>
+
+                        {canManage && (
+                          <div className="flex items-center space-x-2">
+                            <button
+                              onClick={() => downloadInvoice(invoice.id)}
+                              className="text-gray-400 hover:text-gray-600"
+                              title={t('billing.download')}
+                            >
+                              <Download className="w-4 h-4" />
+                            </button>
+                            
+                            {invoice.status === 'draft' && (
+                              <button
+                                onClick={() => handleSendInvoice(invoice.id)}
+                                className="text-blue-600 hover:text-blue-900"
+                                title={t('billing.sendInvoice')}
+                              >
+                                <Send className="w-4 h-4" />
+                              </button>
+                            )}
+                            
+                            {(invoice.status === 'sent' || invoice.status === 'overdue') && (
+                              <button
+                                onClick={() => handleMarkPaid(invoice.id)}
+                                className="text-green-600 hover:text-green-900"
+                                title={t('billing.markPaid')}
+                              >
+                                <CheckCircle className="w-4 h-4" />
+                              </button>
+                            )}
+                            
+                            <button
+                              onClick={() => handleDeleteInvoice(invoice.id)}
+                              className="text-red-600 hover:text-red-900"
+                              title={t('billing.delete')}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         )}
-                        
-                        {(invoice.status === 'sent' || invoice.status === 'overdue') && (
-                          <button
-                            onClick={() => handleMarkPaid(invoice.id)}
-                            className="text-green-600 hover:text-green-900"
-                            title="Mark as Paid"
-                          >
-                            <CheckCircle className="w-4 h-4" />
-                          </button>
-                        )}
-                        
-                        <button
-                          onClick={() => handleDeleteInvoice(invoice.id)}
-                          className="text-red-600 hover:text-red-900"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
                       </div>
                     </td>
                   </tr>
@@ -445,15 +539,17 @@ const Billing = () => {
         {invoices?.length === 0 && (
           <div className="text-center py-12">
             <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No invoices found</h3>
-            <p className="text-gray-600 mb-4">Create your first invoice to get started.</p>
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="btn-primary btn-md flex items-center mx-auto"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Create Invoice
-            </button>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">{t('billing.noInvoices')}</h3>
+            <p className="text-gray-600 mb-4">{t('billing.noInvoicesHint')}</p>
+            {canManage && (
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="btn-primary btn-md flex items-center mx-auto"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                {t('billing.createInvoice')}
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -462,20 +558,20 @@ const Billing = () => {
       <Modal
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
-        title="Create New Invoice"
+        title={t('billing.createNewInvoice')}
         size="lg"
       >
         <form onSubmit={handleSubmit(handleCreateInvoice)} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Client *
+                {t('billing.client')} *
               </label>
               <select
-                {...register('client_id', { required: 'Client is required' })}
+                {...register('client_id', { required: t('billing.clientRequired') })}
                 className={`input ${errors.client_id ? 'border-red-300' : ''}`}
               >
-                <option value="">Select a client</option>
+                <option value="">{t('billing.selectClient')}</option>
                 {clients?.map((client) => (
                   <option key={client.id} value={client.id}>
                     {client.name}
@@ -489,13 +585,13 @@ const Billing = () => {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Project
+                {t('billing.project')}
               </label>
               <select
                 {...register('project_id')}
                 className="input"
               >
-                <option value="">Select a project (optional)</option>
+                <option value="">{t('billing.selectProject')}</option>
                 {filteredProjects?.map((project) => (
                   <option key={project.id} value={project.id}>
                     {project.name}
@@ -508,12 +604,13 @@ const Billing = () => {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Amount *
+                {t('billing.amount')}
               </label>
               <input
                 {...register('amount', { 
-                  required: 'Amount is required',
-                  min: { value: 0.01, message: 'Amount must be greater than 0' }
+                  validate: (value) =>
+                    value === '' || value === null || value === undefined ||
+                    Number(value) > 0 || t('billing.amountMin')
                 })}
                 type="number"
                 step="0.01"
@@ -522,11 +619,19 @@ const Billing = () => {
               {errors.amount && (
                 <p className="mt-1 text-sm text-red-600">{errors.amount.message}</p>
               )}
+              <p className="mt-1 text-xs text-gray-500">{t('billing.amountOptionalHint')}</p>
+              {selectedProjectId && (
+                <p className="mt-1 text-sm text-gray-600">
+                  {selectedBillableProject && selectedBillableProject.unbilled_hours > 0
+                    ? `${t('billing.unbilledLabel')}: ${selectedBillableProject.unbilled_hours} h — ${formatCurrency(selectedBillableProject.unbilled_amount)}`
+                    : t('billing.noUnbilledTime')}
+                </p>
+              )}
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Due Date
+                {t('billing.dueDateOptional')}
               </label>
               <input
                 {...register('due_date')}
@@ -536,21 +641,63 @@ const Billing = () => {
             </div>
           </div>
 
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                {t('billing.discountType')}
+              </label>
+              <select
+                {...register('discount_type')}
+                className="input"
+              >
+                <option value="amount">{t('billing.discountTypeAmount')}</option>
+                <option value="percent">{t('billing.discountTypePercent')}</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                {t('billing.discountValue')}
+              </label>
+              <input
+                {...register('discount_value')}
+                type="number"
+                min="0"
+                step="0.01"
+                className="input"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                {t('billing.taxRate')}
+              </label>
+              <input
+                {...register('tax_rate')}
+                type="number"
+                min="0"
+                step="0.01"
+                className="input"
+              />
+              <p className="mt-1 text-xs text-gray-500">{t('billing.taxOptionalHint')}</p>
+            </div>
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Description
+              {t('billing.description')}
             </label>
             <textarea
               {...register('description')}
               rows={3}
               className="input"
-              placeholder="Invoice description or notes..."
+              placeholder={t('billing.descriptionPlaceholder')}
             />
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Include Time Entries
+              {t('billing.includeTimeEntries')}
             </label>
             <div className="flex items-center space-x-4">
               <label className="flex items-center">
@@ -560,9 +707,34 @@ const Billing = () => {
                   className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                 />
                 <span className="ml-2 text-sm text-gray-700">
-                  Include unbilled time entries for this project
+                  {t('billing.includeTimeEntriesHint')}
                 </span>
               </label>
+            </div>
+          </div>
+
+          <div className="rounded-lg bg-gray-50 border border-gray-200 p-4 space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-gray-500">{t('billing.subtotal')}</span>
+              <span className="text-gray-900">{formatCurrency(previewBaseSubtotal)}</span>
+            </div>
+            {previewDiscount > 0 && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">{t('billing.discount')}</span>
+                <span className="text-gray-900">- {formatCurrency(previewDiscount)}</span>
+              </div>
+            )}
+            {previewTax > 0 && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">
+                  {t('billing.taxLabel')} ({formatNumber(previewTaxRate, 2)}%)
+                </span>
+                <span className="text-gray-900">{formatCurrency(previewTax)}</span>
+              </div>
+            )}
+            <div className="flex justify-between border-t border-gray-200 pt-2 font-semibold">
+              <span className="text-gray-900">{t('billing.total')}</span>
+              <span className="text-gray-900">{formatCurrency(previewTotal)}</span>
             </div>
           </div>
 
@@ -572,7 +744,7 @@ const Billing = () => {
               onClick={() => setShowCreateModal(false)}
               className="btn-outline btn-md"
             >
-              Cancel
+              {t('billing.cancel')}
             </button>
             <button
               type="submit"
@@ -582,11 +754,200 @@ const Billing = () => {
               {createInvoiceMutation.isPending ? (
                 <LoadingSpinner size="sm" color="white" />
               ) : (
-                'Create Invoice'
+                t('billing.createInvoice')
               )}
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* View Invoice Modal */}
+      <Modal
+        isOpen={showViewModal}
+        onClose={() => setViewInvoiceId(null)}
+        title={t('billing.invoiceDetails')}
+        size="lg"
+      >
+        {isLoadingInvoice ? (
+          <div className="flex justify-center items-center py-12">
+            <LoadingSpinner size="lg" />
+          </div>
+        ) : invoiceDetail?.invoice ? (
+          <div className="space-y-6">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm text-gray-500">{t('billing.invoice')}</p>
+                <p className="text-xl font-semibold text-gray-900">
+                  #{invoiceDetail.invoice.invoice_number}
+                </p>
+              </div>
+              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusConfig(invoiceDetail.invoice.status).bgColor} ${getStatusConfig(invoiceDetail.invoice.status).textColor}`}>
+                {getStatusLabel(invoiceDetail.invoice.status)}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <p className="text-gray-500">{t('billing.issueDate')}</p>
+                <p className="text-gray-900">
+                  {invoiceDetail.invoice.issue_date
+                    ? formatDate(invoiceDetail.invoice.issue_date, 'MMM d, yyyy')
+                    : '-'}
+                </p>
+              </div>
+              <div>
+                <p className="text-gray-500">{t('billing.dueDate')}</p>
+                <p className="text-gray-900">
+                  {invoiceDetail.invoice.due_date
+                    ? formatDate(invoiceDetail.invoice.due_date, 'MMM d, yyyy')
+                    : '-'}
+                </p>
+              </div>
+            </div>
+
+            <div className="text-sm">
+              <p className="text-gray-500">{t('billing.billTo')}</p>
+              <p className="font-medium text-gray-900">{invoiceDetail.invoice.client?.name}</p>
+              {invoiceDetail.invoice.client?.company && (
+                <p className="text-gray-700">{invoiceDetail.invoice.client.company}</p>
+              )}
+              {invoiceDetail.invoice.client?.email && (
+                <p className="text-gray-700">{invoiceDetail.invoice.client.email}</p>
+              )}
+            </div>
+
+            {invoiceDetail.invoice.project?.name && (
+              <div className="text-sm">
+                <p className="text-gray-500">{t('billing.project')}</p>
+                <p className="text-gray-900">{invoiceDetail.invoice.project.name}</p>
+              </div>
+            )}
+
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      {t('billing.description')}
+                    </th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      {t('billing.quantity')}
+                    </th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      {t('billing.rate')}
+                    </th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      {t('billing.amount')}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {invoiceDetail.items?.length ? (
+                    invoiceDetail.items.map((item) => (
+                      <tr key={item.id}>
+                        <td className="px-3 py-2 text-sm text-gray-900">{item.description}</td>
+                        <td className="px-3 py-2 text-sm text-gray-900 text-right">
+                          {formatNumber(item.quantity, 2)}
+                        </td>
+                        <td className="px-3 py-2 text-sm text-gray-900 text-right">
+                          {formatCurrency(item.rate, invoiceDetail.invoice.currency || 'USD')}
+                        </td>
+                        <td className="px-3 py-2 text-sm text-gray-900 text-right">
+                          {formatCurrency(item.amount, invoiceDetail.invoice.currency || 'USD')}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={4} className="px-3 py-4 text-center text-sm text-gray-500">
+                        {t('billing.noItems')}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex justify-end">
+              <div className="w-full sm:w-64 space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">{t('billing.subtotal')}</span>
+                  <span className="text-gray-900">
+                    {formatCurrency(invoiceDetail.invoice.subtotal, invoiceDetail.invoice.currency || 'USD')}
+                  </span>
+                </div>
+                {invoiceDetail.invoice.discount_amount > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">
+                      {t('billing.discount')}
+                      {invoiceDetail.invoice.discount_type === 'percent' && invoiceDetail.invoice.discount_value != null
+                        ? ` (${invoiceDetail.invoice.discount_value}%)`
+                        : ''}
+                    </span>
+                    <span className="text-gray-900">
+                      - {formatCurrency(invoiceDetail.invoice.discount_amount, invoiceDetail.invoice.currency || 'USD')}
+                    </span>
+                  </div>
+                )}
+                {invoiceDetail.invoice.tax_amount > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">
+                      {t('billing.taxLabel')} ({formatNumber(invoiceDetail.invoice.tax_rate || 0, 2)}%)
+                    </span>
+                    <span className="text-gray-900">
+                      {formatCurrency(invoiceDetail.invoice.tax_amount, invoiceDetail.invoice.currency || 'USD')}
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between border-t border-gray-200 pt-2 font-semibold">
+                  <span className="text-gray-900">{t('billing.total')}</span>
+                  <span className="text-gray-900">
+                    {formatCurrency(invoiceDetail.invoice.total_amount, invoiceDetail.invoice.currency || 'USD')}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {(invoiceDetail.invoice.notes || invoiceDetail.invoice.terms) && (
+              <div className="space-y-3 text-sm">
+                {invoiceDetail.invoice.notes && (
+                  <div>
+                    <p className="text-gray-500">{t('billing.notes')}</p>
+                    <p className="text-gray-900 whitespace-pre-wrap">{invoiceDetail.invoice.notes}</p>
+                  </div>
+                )}
+                {invoiceDetail.invoice.terms && (
+                  <div>
+                    <p className="text-gray-500">{t('billing.terms')}</p>
+                    <p className="text-gray-900 whitespace-pre-wrap">{invoiceDetail.invoice.terms}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex justify-end space-x-3 pt-4">
+              <button
+                type="button"
+                onClick={() => downloadInvoice(viewInvoiceId)}
+                className="btn-outline btn-md flex items-center"
+              >
+                <Download className="w-4 h-4 mr-2" />
+                {t('billing.download')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewInvoiceId(null)}
+                className="btn-primary btn-md"
+              >
+                {t('billing.close')}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="py-12 text-center text-sm text-gray-600">
+            {t('billing.loadError')}
+          </div>
+        )}
       </Modal>
     </div>
   );

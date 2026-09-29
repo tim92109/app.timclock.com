@@ -1,6 +1,6 @@
-# TimeClock Frontend Application
+# TimClock Frontend Application
 
-A modern ReactJS frontend application for the TimeClock time tracking system. This application provides a comprehensive interface for managing time tracking, projects, clients, and billing.
+A modern ReactJS frontend application for the TimClock time tracking system. This application provides a comprehensive interface for managing time tracking, projects, clients, and billing.
 
 ## Features
 
@@ -158,8 +158,8 @@ The frontend integrates with the following backend endpoints:
 - `POST /time` - Create time entry
 - `PUT /time/:id` - Update time entry
 - `DELETE /time/:id` - Delete time entry
-- `POST /time/start` - Start timer
-- `POST /time/stop` - Stop timer
+- `POST /time/clock-in` - Start timer
+- `POST /time/clock-out` - Stop timer
 - `GET /time/active` - Get active timer
 - `GET /time/export` - Export time entries
 
@@ -281,4 +281,4 @@ The application is built as a static SPA and can be deployed to any web server. 
 
 ## License
 
-This project is part of the TimeClock application suite.
+This project is part of the TimClock application suite.

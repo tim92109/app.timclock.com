@@ -12,6 +12,10 @@ const {
   asyncHandler 
 } = require('./errorHandler');
 const { USER_ROLES } = require('../utils/constants');
+const {
+  employeeProjectAccess,
+  pushEmployeeProjectAccessParams
+} = require('../utils/helpers');
 
 // Token blacklist (in production, use Redis or database)
 const tokenBlacklist = new Set();
@@ -22,14 +26,10 @@ const tokenBlacklist = new Set();
  * @returns {Object} Decoded token payload
  */
 const verifyToken = (token) => {
-  try {
-    return jwt.verify(token, authConfig.jwt.secret, {
-      issuer: authConfig.jwt.issuer,
-      audience: authConfig.jwt.audience
-    });
-  } catch (error) {
-    throw error;
-  }
+  return jwt.verify(token, authConfig.jwt.secret, {
+    issuer: authConfig.jwt.issuer,
+    audience: authConfig.jwt.audience
+  });
 };
 
 /**
@@ -60,7 +60,7 @@ const extractToken = (req) => {
 const getUserById = async (userId) => {
   const query = `
     SELECT id, username, email, first_name, last_name, role, 
-           hourly_rate, is_active, last_login, created_at
+           hourly_rate, phone, is_active, last_login, created_at
     FROM users 
     WHERE id = ? AND is_active = 1
   `;
@@ -215,13 +215,21 @@ const authorizeProjectAccess = asyncHandler(async (req, res, next) => {
   }
   
   // Check if user has access to this project
-  const query = `
+  let query = `
     SELECT p.id, p.name, p.client_id, p.assigned_to, p.created_by
     FROM projects p
     WHERE p.id = ? AND p.is_active = 1
   `;
-  
-  const projects = await executeQuery(query, [projectId]);
+
+  const queryParams = [projectId];
+
+  // Employees may be the lead, the creator, or a project_assignments member.
+  if (req.user.role === USER_ROLES.EMPLOYEE) {
+    query += ` AND ${employeeProjectAccess('p')}`;
+    pushEmployeeProjectAccessParams(queryParams, req.user.id);
+  }
+
+  const projects = await executeQuery(query, queryParams);
   
   if (projects.length === 0) {
     throw new AuthorizationError('Project not found or access denied');
@@ -236,11 +244,10 @@ const authorizeProjectAccess = asyncHandler(async (req, res, next) => {
     }
   }
   
-  // Employee can only access projects assigned to them
+  // Employee can access projects they are assigned to, created, or are a
+  // project_assignments member of; the SQL filter above already enforced this.
   if (req.user.role === USER_ROLES.EMPLOYEE) {
-    if (project.assigned_to === req.user.id) {
-      return next();
-    }
+    return next();
   }
   
   throw new AuthorizationError('Access denied to this project');
@@ -270,10 +277,10 @@ const authorizeClientAccess = asyncHandler(async (req, res, next) => {
     SELECT DISTINCT c.id
     FROM clients c
     INNER JOIN projects p ON c.id = p.client_id
-    WHERE c.id = ? AND p.assigned_to = ? AND c.is_active = 1
+    WHERE c.id = ? AND ${employeeProjectAccess('p')} AND c.is_active = 1
   `;
   
-  const clients = await executeQuery(query, [clientId, req.user.id]);
+  const clients = await executeQuery(query, [clientId, req.user.id, req.user.id, req.user.id]);
   
   if (clients.length === 0) {
     throw new AuthorizationError('Access denied to this client');

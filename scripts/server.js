@@ -10,15 +10,12 @@ const rateLimit = require('express-rate-limit');
 const compression = require('compression');
 const morgan = require('morgan');
 const path = require('path');
-// Load environment variables
-// Load .env first to get NODE_ENV, then load the appropriate environment file
+// Load environment variables.
+// Only .env is loaded here. Environment-specific configuration is provided by the
+// deployment environment (pm2 env_production, host env vars), never by a committed
+// file: a committed override previously reset DB_HOST and silently pointed local
+// development at the remote production database.
 require('dotenv').config({ path: path.join(__dirname, '.env') });
-const envPath = process.env.NODE_ENV === 'development'
-  ? path.join(__dirname, '.env.development')
-  : undefined;
-if (envPath) {
-  require('dotenv').config({ path: envPath, override: true });
-}
 
 // Import middleware
 const { globalErrorHandler, notFoundHandler } = require('./middleware/errorHandler');
@@ -30,6 +27,7 @@ const projectRoutes = require('./routes/projects');
 const timeEntryRoutes = require('./routes/timeEntries');
 const billingRoutes = require('./routes/billing');
 const dashboardRoutes = require('./routes/dashboard');
+const userRoutes = require('./routes/users');
 
 // Import database connection
 const db = require('./config/database');
@@ -176,12 +174,13 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/time', timeEntryRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/users', userRoutes);
 
 // API documentation endpoint
 app.get('/api', (req, res) => {
   res.json({
     success: true,
-    message: 'TimeClock API Server',
+    message: 'TimClock API Server',
     version: process.env.npm_package_version || '1.0.0',
     documentation: '/api/docs',
     endpoints: {
@@ -265,7 +264,7 @@ const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || 'localhost';
 
 const server = app.listen(PORT, HOST, () => {
-  console.log('🚀 TimeClock API Server Started');
+  console.log('🚀 TimClock API Server Started');
   console.log('═══════════════════════════════════════════════════════════════════════════════════════');
   console.log(`📍 Server running at: http://${HOST}:${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
@@ -276,7 +275,7 @@ const server = app.listen(PORT, HOST, () => {
   console.log(`   • Authentication: http://${HOST}:${PORT}/api/auth`);
   console.log(`   • Clients: http://${HOST}:${PORT}/api/clients`);
   console.log(`   • Projects: http://${HOST}:${PORT}/api/projects`);
-  console.log(`   • Time Entries: http://${HOST}:${PORT}/api/time-entries`);
+  console.log(`   • Time Entries: http://${HOST}:${PORT}/api/time`);
   console.log(`   • Billing: http://${HOST}:${PORT}/api/billing`);
   console.log(`   • Dashboard: http://${HOST}:${PORT}/api/dashboard`);
   console.log('═══════════════════════════════════════════════════════════════════════════════════════');

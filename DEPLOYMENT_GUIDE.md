@@ -1,4 +1,4 @@
-# TimeClock API Routing - Complete Fix & Deployment Guide
+# TimClock API Routing - Complete Fix & Deployment Guide
 
 ## 🔍 Root Cause Analysis
 
@@ -35,6 +35,15 @@ DB_PASSWORD=YOUR_ACTUAL_PASSWORD
 DB_NAME=timeclock_db
 JWT_SECRET=YOUR_SECURE_JWT_SECRET
 ```
+
+> **Note:** `.env` is no longer tracked by git. In production, DB/JWT/session
+> values are supplied by the host/pm2 environment rather than a committed file.
+> Export `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`,
+> `JWT_SECRET`, `SESSION_SECRET`, and `ALLOWED_ORIGINS` on the server (or via
+> pm2's environment) before `pm2 start ecosystem.config.js --env production`;
+> the `env_production` block passes them through by name. Rotate all
+> DB/JWT/session secrets before deploying to production, and never reuse the
+> development demo passwords (`admin123`/`manager123`/`employee123`).
 
 ### 3. Start Backend Server
 ```bash

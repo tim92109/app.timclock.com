@@ -35,13 +35,17 @@ const register = asyncHandler(async (req, res) => {
     password,
     first_name,
     last_name,
-    role = USER_ROLES.EMPLOYEE,
+    role,
     hourly_rate,
     phone
   } = req.body;
 
-  // SECURITY: Prevent self-registration as admin/manager
-  const assignedRole = USER_ROLES.EMPLOYEE;
+  // SECURITY: self-registration is limited to employee, contractor, or manager.
+  // Admin accounts must be provisioned by an administrator.
+  const assignedRole = role || USER_ROLES.EMPLOYEE;
+  if (![USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR, USER_ROLES.MANAGER].includes(assignedRole)) {
+    throw new ValidationError('Role must be one of: employee, contractor, manager');
+  }
 
   // Check if user already exists
   const existingUserQuery = `
@@ -62,8 +66,8 @@ const register = asyncHandler(async (req, res) => {
   const insertQuery = `
     INSERT INTO users (
       username, email, password_hash, first_name, last_name, 
-      role, hourly_rate, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+      role, hourly_rate, phone, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
   `;
   
   const result = await executeQuery(insertQuery, [
@@ -73,13 +77,14 @@ const register = asyncHandler(async (req, res) => {
     first_name,
     last_name,
     assignedRole,
-    hourly_rate || null
+    hourly_rate || null,
+    phone || null
   ]);
 
   // Get the created user
   const userQuery = `
     SELECT id, username, email, first_name, last_name, role, 
-           hourly_rate, is_active, created_at
+           hourly_rate, phone, is_active, created_at
     FROM users 
     WHERE id = ?
   `;
@@ -107,6 +112,7 @@ const register = asyncHandler(async (req, res) => {
         last_name: user.last_name,
         role: user.role,
         hourly_rate: user.hourly_rate,
+        phone: user.phone,
         is_active: user.is_active,
         created_at: user.created_at
       },
@@ -126,7 +132,7 @@ const login = asyncHandler(async (req, res) => {
   // Find user by username or email
   const userQuery = `
     SELECT id, username, email, password_hash, first_name, last_name, 
-           role, hourly_rate, is_active, last_login
+           role, hourly_rate, phone, is_active, last_login
     FROM users 
     WHERE (username = ? OR email = ?) AND is_active = 1
   `;
@@ -200,6 +206,7 @@ const login = asyncHandler(async (req, res) => {
         last_name: user.last_name,
         role: user.role,
         hourly_rate: user.hourly_rate,
+        phone: user.phone,
         last_login: formatDate(user.last_login)
       },
       tokens
@@ -283,6 +290,7 @@ const getProfile = asyncHandler(async (req, res) => {
         last_name: user.last_name,
         role: user.role,
         hourly_rate: user.hourly_rate,
+        phone: user.phone,
         is_active: user.is_active,
         last_login: formatDate(user.last_login),
         created_at: formatDate(user.created_at)
@@ -338,6 +346,10 @@ const updateProfile = asyncHandler(async (req, res) => {
     updateFields.push('hourly_rate = ?');
     updateValues.push(hourly_rate);
   }
+  if (phone !== undefined) {
+    updateFields.push('phone = ?');
+    updateValues.push(phone || null);
+  }
 
   if (updateFields.length === 0) {
     throw new ValidationError('No fields to update');
@@ -357,7 +369,7 @@ const updateProfile = asyncHandler(async (req, res) => {
   // Get updated user
   const userQuery = `
     SELECT id, username, email, first_name, last_name, role, 
-           hourly_rate, is_active, last_login, created_at, updated_at
+           hourly_rate, phone, is_active, last_login, created_at, updated_at
     FROM users 
     WHERE id = ?
   `;
@@ -377,6 +389,7 @@ const updateProfile = asyncHandler(async (req, res) => {
         last_name: user.last_name,
         role: user.role,
         hourly_rate: user.hourly_rate,
+        phone: user.phone,
         is_active: user.is_active,
         last_login: formatDate(user.last_login),
         created_at: formatDate(user.created_at),

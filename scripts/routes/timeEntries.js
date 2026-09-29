@@ -50,40 +50,40 @@ router.get('/project/:projectId', timeController.getProjectTimeEntries);
 /**
  * @route   POST /api/time-entries/bulk
  * @desc    Create multiple time entries
- * @access  Private (Admin, Manager only)
+ * @access  Private (Admin, Manager, Contractor)
  */
 router.post('/bulk', 
-  authorize(['admin', 'manager']), 
+  authorize(['admin', 'manager', 'contractor']), 
   timeController.createBulkTimeEntries
 );
 
 /**
  * @route   PUT /api/time-entries/bulk
  * @desc    Update multiple time entries
- * @access  Private (Admin, Manager only)
+ * @access  Private (Admin, Manager, Contractor)
  */
 router.put('/bulk', 
-  authorize(['admin', 'manager']), 
+  authorize(['admin', 'manager', 'contractor']), 
   timeController.updateBulkTimeEntries
 );
 
 /**
  * @route   DELETE /api/time-entries/bulk
  * @desc    Delete multiple time entries
- * @access  Private (Admin, Manager only)
+ * @access  Private (Admin, Manager, Contractor)
  */
 router.delete('/bulk', 
-  authorize(['admin', 'manager']), 
+  authorize(['admin', 'manager', 'contractor']), 
   timeController.deleteBulkTimeEntries
 );
 
 /**
  * @route   GET /api/time-entries/export
  * @desc    Export time entries to CSV
- * @access  Private (Admin, Manager only)
+ * @access  Private (Admin, Manager, Contractor)
  */
 router.get('/export', 
-  authorize(['admin', 'manager']), 
+  authorize(['admin', 'manager', 'contractor']), 
   timeController.exportTimeEntries
 );
 

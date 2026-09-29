@@ -46,42 +46,59 @@ api.interceptors.response.use(
     return response;
   },
   async (error) => {
-    const originalRequest = error.config;
+    const originalRequest = error.config || {};
+    const status = error.response?.status;
+    const requestUrl = originalRequest.url || '';
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
 
-      try {
-        const refreshToken = getRefreshToken();
-        if (refreshToken) {
+      const refreshToken = getRefreshToken();
+
+      if (refreshToken) {
+        try {
           const response = await axios.post('/api/auth/refresh', {
             refreshToken,
           });
 
-          const { tokens } = response.data;
+          // The backend wraps its payload as { status, data: { tokens } }.
+          // Refresh uses raw axios, so it bypasses the response unwrap above.
+          const tokens = response.data?.data?.tokens || response.data?.tokens;
+
+          if (!tokens?.accessToken) {
+            throw new Error('Invalid refresh response');
+          }
+
           setToken(tokens.accessToken);
           setRefreshToken(tokens.refreshToken);
 
           // Retry original request with new token
           originalRequest.headers.Authorization = `Bearer ${tokens.accessToken}`;
           return api(originalRequest);
+        } catch (refreshError) {
+          // Refresh failed, redirect to login
+          removeToken();
+          removeRefreshToken();
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login';
+          }
+          return Promise.reject(refreshError);
         }
-      } catch (refreshError) {
-        // Refresh failed, redirect to login
-        removeToken();
-        removeRefreshToken();
-        window.location.href = '/login';
-        return Promise.reject(refreshError);
       }
     }
 
-    // Handle other errors
-    if (error.response?.data?.message) {
-      toast.error(error.response.data.message);
-    } else if (error.message) {
-      toast.error(error.message);
-    } else {
-      toast.error('An unexpected error occurred');
+    // Expected 401s from the logged-out session probe (/auth/verify) are not
+    // user-facing errors, so they are not toasted.
+    const isSilentAuthProbe = requestUrl.includes('/auth/verify');
+
+    if (!isSilentAuthProbe) {
+      if (error.response?.data?.message) {
+        toast.error(error.response.data.message);
+      } else if (error.message) {
+        toast.error(error.message);
+      } else {
+        toast.error('An unexpected error occurred');
+      }
     }
 
     return Promise.reject(error);
@@ -133,7 +150,7 @@ export const timeAPI = {
   updateTimeEntry: (id, data) => api.put(`/time/${id}`, data),
   deleteTimeEntry: (id) => api.delete(`/time/${id}`),
   clockIn: (data) => api.post('/time/clock-in', data),
-  clockOut: (id) => api.post(`/time/${id}/clock-out`),
+  clockOut: () => api.post('/time/clock-out'),
   getActiveEntry: () => api.get('/time/active'),
 };
 

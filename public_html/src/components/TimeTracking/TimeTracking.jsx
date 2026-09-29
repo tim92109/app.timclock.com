@@ -3,29 +3,36 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { 
   Play, 
-  Pause, 
   Square, 
   Clock, 
-  Calendar,
-  Filter,
   Download,
   Edit,
   Trash2,
   Plus
 } from 'lucide-react';
 import { api } from '../../services/api';
-import { formatDuration, formatDate, formatDateTime } from '../../utils/helpers';
-import { useAuth } from '../../hooks/useAuth';
+import { formatDuration, formatDate, formatDateTime, formatTimer } from '../../utils/helpers';
 import LoadingSpinner from '../Common/LoadingSpinner';
 import ErrorMessage from '../Common/ErrorMessage';
 import Modal from '../Common/Modal';
+import { useSettings } from '../../hooks/useSettings.jsx';
+import { useAuth } from '../../hooks/useAuth.jsx';
+import { USER_ROLES } from '../../utils/constants';
 import toast from 'react-hot-toast';
 
+// Convert a <input type="datetime-local"> value (naive local time) into an absolute
+// ISO 8601 instant so the API stores the intended moment regardless of the server's
+// timezone. Without this, the server reads the wall-clock string as its own local
+// time and entries shift by the server/viewer offset.
+const toIsoTimestamp = (value) => (value ? new Date(value).toISOString() : value);
+
 const TimeTracking = () => {
+  const { t } = useSettings();
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showStartModal, setShowStartModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingEntry, setEditingEntry] = useState(null);
   const [filters, setFilters] = useState({
@@ -34,6 +41,8 @@ const TimeTracking = () => {
     projectId: '',
     clientId: '',
   });
+
+  const canManage = [USER_ROLES.ADMIN, USER_ROLES.MANAGER, USER_ROLES.CONTRACTOR].includes(user?.role);
 
   // Update current time every second
   useEffect(() => {
@@ -47,8 +56,8 @@ const TimeTracking = () => {
   // Fetch active time entry
   const { data: activeTimeEntry, refetch: refetchActiveEntry } = useQuery({
     queryKey: ['active-time-entry'],
-    queryFn: () => api.get('/time/active').then(res => res.data),
-    refetchInterval: 1000,
+    queryFn: () => api.get('/time/active').then(res => res.data.active_entry),
+    refetchInterval: 30000,
   });
 
   // Fetch time entries
@@ -75,28 +84,16 @@ const TimeTracking = () => {
     queryFn: () => api.get('/clients').then(res => res.data),
   });
 
-  // Start timer mutation
-  const startTimerMutation = useMutation({
-    mutationFn: (data) => api.post('/time/start', data),
-    onSuccess: () => {
-      toast.success('Timer started successfully');
-      refetchActiveEntry();
-    },
-    onError: (error) => {
-      toast.error(error.response?.data?.message || 'Failed to start timer');
-    },
-  });
-
   // Stop timer mutation
   const stopTimerMutation = useMutation({
-    mutationFn: () => api.post('/time/stop'),
+    mutationFn: () => api.post('/time/clock-out'),
     onSuccess: () => {
-      toast.success('Timer stopped successfully');
+      toast.success(t('time.toastTimerStopped'));
       refetchActiveEntry();
-      queryClient.invalidateQueries(['time-entries']);
+      queryClient.invalidateQueries({ queryKey: ['time-entries'] });
     },
     onError: (error) => {
-      toast.error(error.response?.data?.message || 'Failed to stop timer');
+      toast.error(error.response?.data?.message || t('time.toastStopTimerFailed'));
     },
   });
 
@@ -104,13 +101,28 @@ const TimeTracking = () => {
   const addTimeEntryMutation = useMutation({
     mutationFn: (data) => api.post('/time', data),
     onSuccess: () => {
-      toast.success('Time entry added successfully');
-      queryClient.invalidateQueries(['time-entries']);
+      toast.success(t('time.toastEntryAdded'));
+      queryClient.invalidateQueries({ queryKey: ['time-entries'] });
       setShowAddModal(false);
       reset();
     },
     onError: (error) => {
-      toast.error(error.response?.data?.message || 'Failed to add time entry');
+      toast.error(error.response?.data?.message || t('time.toastAddFailed'));
+    },
+  });
+
+  // Start timer mutation
+  const startTimerMutation = useMutation({
+    mutationFn: (data) => api.post('/time/clock-in', data),
+    onSuccess: () => {
+      toast.success(t('time.timerStarted'));
+      refetchActiveEntry();
+      queryClient.invalidateQueries({ queryKey: ['active-time-entry'] });
+      setShowStartModal(false);
+      resetStart();
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || t('time.startTimerFailed'));
     },
   });
 
@@ -118,14 +130,14 @@ const TimeTracking = () => {
   const updateTimeEntryMutation = useMutation({
     mutationFn: ({ id, data }) => api.put(`/time/${id}`, data),
     onSuccess: () => {
-      toast.success('Time entry updated successfully');
-      queryClient.invalidateQueries(['time-entries']);
+      toast.success(t('time.toastEntryUpdated'));
+      queryClient.invalidateQueries({ queryKey: ['time-entries'] });
       setShowEditModal(false);
       setEditingEntry(null);
       resetEdit();
     },
     onError: (error) => {
-      toast.error(error.response?.data?.message || 'Failed to update time entry');
+      toast.error(error.response?.data?.message || t('time.toastUpdateFailed'));
     },
   });
 
@@ -133,16 +145,24 @@ const TimeTracking = () => {
   const deleteTimeEntryMutation = useMutation({
     mutationFn: (id) => api.delete(`/time/${id}`),
     onSuccess: () => {
-      toast.success('Time entry deleted successfully');
-      queryClient.invalidateQueries(['time-entries']);
+      toast.success(t('time.toastEntryDeleted'));
+      queryClient.invalidateQueries({ queryKey: ['time-entries'] });
     },
     onError: (error) => {
-      toast.error(error.response?.data?.message || 'Failed to delete time entry');
+      toast.error(error.response?.data?.message || t('time.toastDeleteFailed'));
     },
   });
 
   // Form for adding time entries
   const { register, handleSubmit, formState: { errors }, reset } = useForm();
+
+  // Form for starting a timer
+  const { 
+    register: registerStart, 
+    handleSubmit: handleStartSubmit, 
+    formState: { errors: startErrors }, 
+    reset: resetStart 
+  } = useForm();
 
   // Form for editing time entries
   const { 
@@ -162,27 +182,38 @@ const TimeTracking = () => {
 
   const elapsedSeconds = getElapsedTime();
 
-  const handleStartTimer = (data) => {
-    startTimerMutation.mutate(data);
-  };
-
   const handleStopTimer = () => {
     stopTimerMutation.mutate();
   };
 
   const handleAddTimeEntry = (data) => {
-    addTimeEntryMutation.mutate(data);
+    addTimeEntryMutation.mutate({
+      ...data,
+      start_time: toIsoTimestamp(data.start_time),
+      end_time: toIsoTimestamp(data.end_time),
+    });
+  };
+
+  const handleStartTimer = (data) => {
+    startTimerMutation.mutate({
+      project_id: Number(data.project_id),
+      description: data.description,
+    });
   };
 
   const handleEditTimeEntry = (data) => {
     updateTimeEntryMutation.mutate({
       id: editingEntry.id,
-      data,
+      data: {
+        ...data,
+        start_time: toIsoTimestamp(data.start_time),
+        end_time: toIsoTimestamp(data.end_time),
+      },
     });
   };
 
   const handleDeleteTimeEntry = (id) => {
-    if (window.confirm('Are you sure you want to delete this time entry?')) {
+    if (window.confirm(t('time.confirmDelete'))) {
       deleteTimeEntryMutation.mutate(id);
     }
   };
@@ -190,9 +221,9 @@ const TimeTracking = () => {
   const openEditModal = (entry) => {
     setEditingEntry(entry);
     setEditValue('project_id', entry.project_id);
-    setEditValue('task_description', entry.task_description);
+    setEditValue('description', entry.description);
     setEditValue('start_time', formatDateTime(entry.start_time, "yyyy-MM-dd'T'HH:mm"));
-    setEditValue('end_time', formatDateTime(entry.end_time, "yyyy-MM-dd'T'HH:mm"));
+    setEditValue('end_time', entry.end_time ? formatDateTime(entry.end_time, "yyyy-MM-dd'T'HH:mm") : '');
     setShowEditModal(true);
   };
 
@@ -214,7 +245,7 @@ const TimeTracking = () => {
   }
 
   if (error) {
-    return <ErrorMessage message="Failed to load time entries" />;
+    return <ErrorMessage message={t('time.loadError')} />;
   }
 
   return (
@@ -222,8 +253,8 @@ const TimeTracking = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Time Tracking</h1>
-          <p className="mt-2 text-gray-600">Track your time and manage entries</p>
+          <h1 className="text-3xl font-bold text-gray-900">{t('time.title')}</h1>
+          <p className="mt-2 text-gray-600">{t('time.subtitle')}</p>
         </div>
         <div className="mt-4 sm:mt-0 flex space-x-3">
           <button
@@ -231,21 +262,23 @@ const TimeTracking = () => {
             className="btn-secondary btn-md flex items-center"
           >
             <Plus className="w-4 h-4 mr-2" />
-            Add Entry
+            {t('time.addEntry')}
           </button>
-          <button
-            onClick={exportTimeEntries}
-            className="btn-outline btn-md flex items-center"
-          >
-            <Download className="w-4 h-4 mr-2" />
-            Export
-          </button>
+          {canManage && (
+            <button
+              onClick={exportTimeEntries}
+              className="btn-outline btn-md flex items-center"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              {t('time.export')}
+            </button>
+          )}
         </div>
       </div>
 
       {/* Active Timer */}
       <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-xl font-semibold text-gray-900 mb-4">Current Timer</h2>
+        <h2 className="text-xl font-semibold text-gray-900 mb-4">{t('time.currentTimer')}</h2>
         
         {activeTimeEntry ? (
           <div className="flex items-center justify-between">
@@ -257,15 +290,15 @@ const TimeTracking = () => {
                 <h3 className="text-lg font-medium text-gray-900">
                   {activeTimeEntry.project_name}
                 </h3>
-                <p className="text-gray-600">{activeTimeEntry.task_description}</p>
+                <p className="text-gray-600">{activeTimeEntry.description}</p>
                 <p className="text-sm text-gray-500">
-                  Started at {formatDateTime(activeTimeEntry.start_time, 'h:mm a')}
+                  {t('time.startedAt')} {formatDateTime(activeTimeEntry.start_time, 'h:mm a')}
                 </p>
               </div>
             </div>
             <div className="text-right">
               <div className="text-3xl font-mono font-bold text-gray-900">
-                {formatDuration(elapsedSeconds)}
+                {formatTimer(elapsedSeconds)}
               </div>
               <button
                 onClick={handleStopTimer}
@@ -277,7 +310,7 @@ const TimeTracking = () => {
                 ) : (
                   <>
                     <Square className="w-4 h-4 mr-2" />
-                    Stop Timer
+                    {t('time.stopTimer')}
                   </>
                 )}
               </button>
@@ -286,13 +319,13 @@ const TimeTracking = () => {
         ) : (
           <div className="text-center py-8">
             <Clock className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <p className="text-gray-500 mb-4">No active timer</p>
+            <p className="text-gray-500 mb-4">{t('time.noActiveTimer')}</p>
             <button
-              onClick={() => setShowAddModal(true)}
+              onClick={() => setShowStartModal(true)}
               className="btn-primary btn-md flex items-center mx-auto"
             >
               <Play className="w-4 h-4 mr-2" />
-              Start Timer
+              {t('time.startTimer')}
             </button>
           </div>
         )}
@@ -300,11 +333,11 @@ const TimeTracking = () => {
 
       {/* Filters */}
       <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Filters</h3>
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">{t('time.filters')}</h3>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Start Date
+              {t('time.startDate')}
             </label>
             <input
               type="date"
@@ -315,7 +348,7 @@ const TimeTracking = () => {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              End Date
+              {t('time.endDate')}
             </label>
             <input
               type="date"
@@ -326,14 +359,14 @@ const TimeTracking = () => {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Project
+              {t('time.project')}
             </label>
             <select
               value={filters.projectId}
               onChange={(e) => setFilters({ ...filters, projectId: e.target.value })}
               className="input"
             >
-              <option value="">All Projects</option>
+              <option value="">{t('time.allProjects')}</option>
               {projects?.map((project) => (
                 <option key={project.id} value={project.id}>
                   {project.name}
@@ -343,14 +376,14 @@ const TimeTracking = () => {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Client
+              {t('time.client')}
             </label>
             <select
               value={filters.clientId}
               onChange={(e) => setFilters({ ...filters, clientId: e.target.value })}
               className="input"
             >
-              <option value="">All Clients</option>
+              <option value="">{t('time.allClients')}</option>
               {clients?.map((client) => (
                 <option key={client.id} value={client.id}>
                   {client.name}
@@ -364,48 +397,48 @@ const TimeTracking = () => {
       {/* Time Entries Table */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">Time Entries</h3>
+          <h3 className="text-lg font-semibold text-gray-900">{t('time.timeEntries')}</h3>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50 flex">
+            <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Date
+                  {t('time.date')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Project
+                  {t('time.project')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Task
+                  {t('time.task')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Duration
+                  {t('time.duration')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
+                  {t('time.actions')}
                 </th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {timeEntries?.map((entry) => (
-                <tr key={entry.id} className="hover:bg-gray-50 hover:flex">
+                <tr key={entry.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                     {formatDate(entry.start_time, 'MMM d, yyyy')}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm font-medium text-gray-900">
-                      {entry.project_name}
+                      {entry.project?.name}
                     </div>
                     <div className="text-sm text-gray-500">
-                      {entry.client_name}
+                      {entry.client?.name}
                     </div>
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-900">
-                    {entry.task_description}
+                    {entry.description}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {formatDuration(entry.duration)}
+                    {formatDuration(entry.duration_minutes)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                     <div className="flex space-x-2">
@@ -430,22 +463,87 @@ const TimeTracking = () => {
         </div>
       </div>
 
+      {/* Start Timer Modal */}
+      <Modal
+        isOpen={showStartModal}
+        onClose={() => setShowStartModal(false)}
+        title={t('time.startTimerModalTitle')}
+      >
+        <form onSubmit={handleStartSubmit(handleStartTimer)} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              {t('time.startTimerProject')}
+            </label>
+            <select
+              {...registerStart('project_id', { required: t('time.validationProjectRequired') })}
+              className={`input ${startErrors.project_id ? 'border-red-300' : ''}`}
+            >
+              <option value="">{t('time.selectProject')}</option>
+              {projects?.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+            {startErrors.project_id && (
+              <p className="mt-1 text-sm text-red-600">{startErrors.project_id.message}</p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              {t('time.startTimerDescription')}
+            </label>
+            <textarea
+              {...registerStart('description')}
+              rows={3}
+              className="input"
+            />
+          </div>
+
+          {projects?.length === 0 && (
+            <p className="text-sm text-gray-500">{t('time.noProjects')}</p>
+          )}
+
+          <div className="flex justify-end space-x-3 pt-4">
+            <button
+              type="button"
+              onClick={() => setShowStartModal(false)}
+              className="btn-outline btn-md"
+            >
+              {t('time.cancel')}
+            </button>
+            <button
+              type="submit"
+              disabled={startTimerMutation.isPending || projects?.length === 0}
+              className="btn-primary btn-md flex items-center"
+            >
+              {startTimerMutation.isPending ? (
+                <LoadingSpinner size="sm" color="white" />
+              ) : (
+                t('time.startTimerConfirm')
+              )}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
       {/* Add Time Entry Modal */}
       <Modal
         isOpen={showAddModal}
         onClose={() => setShowAddModal(false)}
-        title="Add Time Entry"
+        title={t('time.addTimeEntry')}
       >
         <form onSubmit={handleSubmit(handleAddTimeEntry)} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Project
+              {t('time.project')}
             </label>
             <select
-              {...register('project_id', { required: 'Project is required' })}
+              {...register('project_id', { required: t('time.validationProjectRequired') })}
               className={`input ${errors.project_id ? 'border-red-300' : ''}`}
             >
-              <option value="">Select a project</option>
+              <option value="">{t('time.selectProject')}</option>
               {projects?.map((project) => (
                 <option key={project.id} value={project.id}>
                   {project.name}
@@ -459,25 +557,25 @@ const TimeTracking = () => {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Task Description
+              {t('time.taskDescription')}
             </label>
             <textarea
-              {...register('task_description', { required: 'Task description is required' })}
+              {...register('description', { required: t('time.validationDescriptionRequired') })}
               rows={3}
-              className={`input ${errors.task_description ? 'border-red-300' : ''}`}
+              className={`input ${errors.description ? 'border-red-300' : ''}`}
             />
-            {errors.task_description && (
-              <p className="mt-1 text-sm text-red-600">{errors.task_description.message}</p>
+            {errors.description && (
+              <p className="mt-1 text-sm text-red-600">{errors.description.message}</p>
             )}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Start Time
+                {t('time.startTime')}
               </label>
               <input
-                {...register('start_time', { required: 'Start time is required' })}
+                {...register('start_time', { required: t('time.validationStartTimeRequired') })}
                 type="datetime-local"
                 className={`input ${errors.start_time ? 'border-red-300' : ''}`}
               />
@@ -488,10 +586,10 @@ const TimeTracking = () => {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                End Time
+                {t('time.endTime')}
               </label>
               <input
-                {...register('end_time', { required: 'End time is required' })}
+                {...register('end_time', { required: t('time.validationEndTimeRequired') })}
                 type="datetime-local"
                 className={`input ${errors.end_time ? 'border-red-300' : ''}`}
               />
@@ -507,7 +605,7 @@ const TimeTracking = () => {
               onClick={() => setShowAddModal(false)}
               className="btn-outline btn-md"
             >
-              Cancel
+              {t('time.cancel')}
             </button>
             <button
               type="submit"
@@ -517,7 +615,7 @@ const TimeTracking = () => {
               {addTimeEntryMutation.isPending ? (
                 <LoadingSpinner size="sm" color="white" />
               ) : (
-                'Add Entry'
+                t('time.addEntry')
               )}
             </button>
           </div>
@@ -528,18 +626,18 @@ const TimeTracking = () => {
       <Modal
         isOpen={showEditModal}
         onClose={() => setShowEditModal(false)}
-        title="Edit Time Entry"
+        title={t('time.editTimeEntry')}
       >
         <form onSubmit={handleEditSubmit(handleEditTimeEntry)} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Project
+              {t('time.project')}
             </label>
             <select
-              {...registerEdit('project_id', { required: 'Project is required' })}
+              {...registerEdit('project_id', { required: t('time.validationProjectRequired') })}
               className={`input ${editErrors.project_id ? 'border-red-300' : ''}`}
             >
-              <option value="">Select a project</option>
+              <option value="">{t('time.selectProject')}</option>
               {projects?.map((project) => (
                 <option key={project.id} value={project.id}>
                   {project.name}
@@ -553,25 +651,25 @@ const TimeTracking = () => {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Task Description
+              {t('time.taskDescription')}
             </label>
             <textarea
-              {...registerEdit('task_description', { required: 'Task description is required' })}
+              {...registerEdit('description', { required: t('time.validationDescriptionRequired') })}
               rows={3}
-              className={`input ${editErrors.task_description ? 'border-red-300' : ''}`}
+              className={`input ${editErrors.description ? 'border-red-300' : ''}`}
             />
-            {editErrors.task_description && (
-              <p className="mt-1 text-sm text-red-600">{editErrors.task_description.message}</p>
+            {editErrors.description && (
+              <p className="mt-1 text-sm text-red-600">{editErrors.description.message}</p>
             )}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Start Time
+                {t('time.startTime')}
               </label>
               <input
-                {...registerEdit('start_time', { required: 'Start time is required' })}
+                {...registerEdit('start_time', { required: t('time.validationStartTimeRequired') })}
                 type="datetime-local"
                 className={`input ${editErrors.start_time ? 'border-red-300' : ''}`}
               />
@@ -582,10 +680,10 @@ const TimeTracking = () => {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                End Time
+                {t('time.endTime')}
               </label>
               <input
-                {...registerEdit('end_time', { required: 'End time is required' })}
+                {...registerEdit('end_time', { required: t('time.validationEndTimeRequired') })}
                 type="datetime-local"
                 className={`input ${editErrors.end_time ? 'border-red-300' : ''}`}
               />
@@ -601,7 +699,7 @@ const TimeTracking = () => {
               onClick={() => setShowEditModal(false)}
               className="btn-outline btn-md"
             >
-              Cancel
+              {t('time.cancel')}
             </button>
             <button
               type="submit"
@@ -611,7 +709,7 @@ const TimeTracking = () => {
               {updateTimeEntryMutation.isPending ? (
                 <LoadingSpinner size="sm" color="white" />
               ) : (
-                'Update Entry'
+                t('time.updateEntry')
               )}
             </button>
           </div>

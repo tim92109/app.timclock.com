@@ -15,19 +15,24 @@ import {
   Eye
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { useSettings } from '../../hooks/useSettings.jsx';
+import { useAuth } from '../../hooks/useAuth.jsx';
 import { formatCurrency, formatDate, formatDuration } from '../../utils/helpers';
-import { STATUS_CONFIG } from '../../utils/constants';
+import { STATUS_CONFIG, USER_ROLES } from '../../utils/constants';
 import LoadingSpinner from '../Common/LoadingSpinner';
 import ErrorMessage from '../Common/ErrorMessage';
 
 const ClientDetail = () => {
+  const { t } = useSettings();
+  const { user } = useAuth();
   const { id } = useParams();
+  const canManage = [USER_ROLES.ADMIN, USER_ROLES.MANAGER, USER_ROLES.CONTRACTOR].includes(user?.role);
   const [activeTab, setActiveTab] = useState('overview');
 
   // Fetch client details
   const { data: client, isLoading, error } = useQuery({
     queryKey: ['client', id],
-    queryFn: () => api.get(`/clients/${id}`).then(res => res.data),
+    queryFn: () => api.get(`/clients/${id}`).then(res => res.data.client),
   });
 
   // Fetch client projects
@@ -57,11 +62,11 @@ const ClientDetail = () => {
   }
 
   if (error) {
-    return <ErrorMessage message="Failed to load client details" />;
+    return <ErrorMessage message={t('clients.detail.loadFailed')} />;
   }
 
-  const totalHours = timeEntries?.reduce((sum, entry) => sum + entry.duration, 0) || 0;
-  const totalRevenue = invoices?.reduce((sum, invoice) => sum + invoice.amount, 0) || 0;
+  const totalHours = timeEntries?.reduce((sum, entry) => sum + (entry.duration_hours || 0) * 60, 0) || 0;
+  const totalRevenue = invoices?.reduce((sum, invoice) => sum + (invoice.total_amount || 0), 0) || 0;
   const activeProjects = projects?.filter(project => project.status === 'active').length || 0;
 
   return (
@@ -86,13 +91,15 @@ const ClientDetail = () => {
           </div>
         </div>
         <div className="flex items-center space-x-3">
-          <Link
-            to={`/clients/${id}/edit`}
-            className="btn-outline btn-md flex items-center"
-          >
-            <Edit className="w-4 h-4 mr-2" />
-            Edit Client
-          </Link>
+          {canManage && (
+            <Link
+              to={`/clients/${id}/edit`}
+              className="btn-outline btn-md flex items-center"
+            >
+              <Edit className="w-4 h-4 mr-2" />
+              {t('clients.detail.editClient')}
+            </Link>
+          )}
         </div>
       </div>
 
@@ -100,7 +107,7 @@ const ClientDetail = () => {
       <div className="bg-white rounded-lg shadow p-6">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <div className="space-y-3">
-            <h3 className="text-sm font-medium text-gray-700">Contact Information</h3>
+            <h3 className="text-sm font-medium text-gray-700">{t('clients.detail.contactInfo')}</h3>
             {client.email && (
               <div className="flex items-center text-sm text-gray-600">
                 <Mail className="w-4 h-4 mr-2 flex-shrink-0" />
@@ -135,27 +142,27 @@ const ClientDetail = () => {
             <div className="text-2xl font-bold text-gray-900">
               {projects?.length || 0}
             </div>
-            <div className="text-sm text-gray-500">Total Projects</div>
+            <div className="text-sm text-gray-500">{t('clients.detail.totalProjects')}</div>
           </div>
 
           <div className="text-center">
             <div className="text-2xl font-bold text-gray-900">
-              {formatDuration(totalHours * 3600)}
+              {formatDuration(totalHours)}
             </div>
-            <div className="text-sm text-gray-500">Total Hours</div>
+            <div className="text-sm text-gray-500">{t('clients.detail.totalHours')}</div>
           </div>
 
           <div className="text-center">
             <div className="text-2xl font-bold text-gray-900">
               {formatCurrency(totalRevenue)}
             </div>
-            <div className="text-sm text-gray-500">Total Revenue</div>
+            <div className="text-sm text-gray-500">{t('clients.detail.totalRevenue')}</div>
           </div>
         </div>
 
         {client.notes && (
           <div className="mt-6 pt-6 border-t border-gray-200">
-            <h3 className="text-sm font-medium text-gray-700 mb-2">Notes</h3>
+            <h3 className="text-sm font-medium text-gray-700 mb-2">{t('clients.detail.notes')}</h3>
             <p className="text-gray-600">{client.notes}</p>
           </div>
         )}
@@ -173,7 +180,7 @@ const ClientDetail = () => {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              Overview
+              {t('clients.detail.tabOverview')}
             </button>
             <button
               onClick={() => setActiveTab('projects')}
@@ -183,7 +190,7 @@ const ClientDetail = () => {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              Projects ({projects?.length || 0})
+              {t('clients.detail.tabProjects')} ({projects?.length || 0})
             </button>
             <button
               onClick={() => setActiveTab('time')}
@@ -193,7 +200,7 @@ const ClientDetail = () => {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              Time Entries
+              {t('clients.detail.tabTimeEntries')}
             </button>
             <button
               onClick={() => setActiveTab('invoices')}
@@ -203,7 +210,7 @@ const ClientDetail = () => {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              Invoices ({invoices?.length || 0})
+              {t('clients.detail.tabInvoices')} ({invoices?.length || 0})
             </button>
           </nav>
         </div>
@@ -219,7 +226,7 @@ const ClientDetail = () => {
                       <FolderOpen className="w-5 h-5 text-primary-600" />
                     </div>
                     <div className="ml-3">
-                      <p className="text-sm font-medium text-primary-600">Active Projects</p>
+                      <p className="text-sm font-medium text-primary-600">{t('clients.detail.activeProjects')}</p>
                       <p className="text-lg font-bold text-primary-900">{activeProjects}</p>
                     </div>
                   </div>
@@ -231,7 +238,7 @@ const ClientDetail = () => {
                       <Clock className="w-5 h-5 text-green-600" />
                     </div>
                     <div className="ml-3">
-                      <p className="text-sm font-medium text-green-600">This Month</p>
+                      <p className="text-sm font-medium text-green-600">{t('clients.detail.thisMonth')}</p>
                       <p className="text-lg font-bold text-green-900">
                         {formatDuration((timeEntries?.filter(entry => 
                           new Date(entry.start_time).getMonth() === new Date().getMonth()
@@ -247,7 +254,7 @@ const ClientDetail = () => {
                       <DollarSign className="w-5 h-5 text-blue-600" />
                     </div>
                     <div className="ml-3">
-                      <p className="text-sm font-medium text-blue-600">Avg. Project Value</p>
+                      <p className="text-sm font-medium text-blue-600">{t('clients.detail.avgProjectValue')}</p>
                       <p className="text-lg font-bold text-blue-900">
                         {projects?.length > 0 
                           ? formatCurrency(totalRevenue / projects.length)
@@ -261,10 +268,10 @@ const ClientDetail = () => {
 
               {/* Recent Activity */}
               <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Activity</h3>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">{t('clients.detail.recentActivity')}</h3>
                 <div className="space-y-3">
                   {timeEntries?.slice(0, 5).map((entry) => (
-                    <div key={entry.id} className="flex items-center space-x-3 p-3 bg-gray-50 flex rounded-lg">
+                    <div key={entry.id} className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
                       <div className="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center">
                         <Clock className="w-4 h-4 text-primary-600" />
                       </div>
@@ -273,12 +280,12 @@ const ClientDetail = () => {
                           {entry.project_name}
                         </p>
                         <p className="text-sm text-gray-500">
-                          {entry.task_description}
+                          {entry.description}
                         </p>
                       </div>
                       <div className="text-right">
                         <p className="text-sm font-medium text-gray-900">
-                          {formatDuration(entry.duration)}
+                          {formatDuration((entry.duration_hours || 0) * 60)}
                         </p>
                         <p className="text-xs text-gray-500">
                           {formatDate(entry.start_time, 'MMM d')}
@@ -288,7 +295,7 @@ const ClientDetail = () => {
                   ))}
                   
                   {timeEntries?.length === 0 && (
-                    <p className="text-gray-500 text-center py-4">No recent activity</p>
+                    <p className="text-gray-500 text-center py-4">{t('clients.detail.noRecentActivity')}</p>
                   )}
                 </div>
               </div>
@@ -319,21 +326,21 @@ const ClientDetail = () => {
                       </div>
                       
                       <div className="space-y-2 text-sm text-gray-600">
-                        {project.budget && (
+                        {project.hourly_rate && (
                           <div className="flex items-center">
                             <DollarSign className="w-4 h-4 mr-1" />
-                            Budget: {formatCurrency(project.budget)}
+                            {t('clients.detail.rateLabel')}: {formatCurrency(project.hourly_rate)}{t('clients.detail.perHour')}
                           </div>
                         )}
-                        {project.deadline && (
+                        {project.due_date && (
                           <div className="flex items-center">
                             <Calendar className="w-4 h-4 mr-1" />
-                            Due: {formatDate(project.deadline, 'MMM d, yyyy')}
+                            {t('clients.detail.dueLabel')}: {formatDate(project.due_date, 'MMM d, yyyy')}
                           </div>
                         )}
                         <div className="flex items-center">
                           <Clock className="w-4 h-4 mr-1" />
-                          {formatDuration((project.total_hours || 0) * 3600)} logged
+                          {formatDuration((project.total_hours || 0) * 60)} {t('clients.detail.logged')}
                         </div>
                       </div>
                     </div>
@@ -344,7 +351,7 @@ const ClientDetail = () => {
               {projects?.length === 0 && (
                 <div className="text-center py-8">
                   <FolderOpen className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500">No projects yet</p>
+                  <p className="text-gray-500">{t('clients.detail.noProjects')}</p>
                 </div>
               )}
             </div>
@@ -354,22 +361,22 @@ const ClientDetail = () => {
             <div>
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50 flex">
+                  <thead className="bg-gray-50">
                     <tr>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Date
+                        {t('clients.table.date')}
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Project
+                        {t('clients.table.project')}
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Task
+                        {t('clients.table.task')}
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Duration
+                        {t('clients.table.duration')}
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        User
+                        {t('clients.table.user')}
                       </th>
                     </tr>
                   </thead>
@@ -383,10 +390,10 @@ const ClientDetail = () => {
                           {entry.project_name}
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-900">
-                          {entry.task_description}
+                          {entry.description}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {formatDuration(entry.duration)}
+                          {formatDuration((entry.duration_hours || 0) * 60)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {entry.user_name}
@@ -400,7 +407,7 @@ const ClientDetail = () => {
               {timeEntries?.length === 0 && (
                 <div className="text-center py-8">
                   <Clock className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500">No time entries yet</p>
+                  <p className="text-gray-500">{t('clients.detail.noTimeEntries')}</p>
                 </div>
               )}
             </div>
@@ -414,7 +421,7 @@ const ClientDetail = () => {
                     <div className="flex items-center justify-between">
                       <div>
                         <h4 className="font-medium text-gray-900">
-                          Invoice #{invoice.invoice_number}
+                          {t('clients.detail.invoice')} #{invoice.invoice_number}
                         </h4>
                         <p className="text-sm text-gray-600">
                           {formatDate(invoice.created_at, 'MMM d, yyyy')}
@@ -422,7 +429,7 @@ const ClientDetail = () => {
                       </div>
                       <div className="text-right">
                         <p className="text-lg font-bold text-gray-900">
-                          {formatCurrency(invoice.amount)}
+                          {formatCurrency(invoice.total_amount)}
                         </p>
                         <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
                           invoice.status === 'paid' 
@@ -437,7 +444,7 @@ const ClientDetail = () => {
                     </div>
                     {invoice.due_date && (
                       <p className="text-sm text-gray-500 mt-2">
-                        Due: {formatDate(invoice.due_date, 'MMM d, yyyy')}
+                        {t('clients.detail.dueLabel')}: {formatDate(invoice.due_date, 'MMM d, yyyy')}
                       </p>
                     )}
                   </div>
@@ -447,7 +454,7 @@ const ClientDetail = () => {
               {invoices?.length === 0 && (
                 <div className="text-center py-8">
                   <DollarSign className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500">No invoices yet</p>
+                  <p className="text-gray-500">{t('clients.detail.noInvoices')}</p>
                 </div>
               )}
             </div>

@@ -7,7 +7,8 @@
 const USER_ROLES = {
   ADMIN: 'admin',
   MANAGER: 'manager',
-  EMPLOYEE: 'employee'
+  EMPLOYEE: 'employee',
+  CONTRACTOR: 'contractor'
 };
 
 // Project Status
@@ -142,7 +143,7 @@ const SUCCESS_MESSAGES = {
 // Date/Time Formats
 const DATE_FORMATS = {
   ISO_DATE: 'YYYY-MM-DD',
-  ISO_DATETIME: 'YYYY-MM-DD HH:mm:ss',
+  ISO_DATETIME: 'YYYY-MM-DDTHH:mm:ssZ',
   DISPLAY_DATE: 'MMM DD, YYYY',
   DISPLAY_DATETIME: 'MMM DD, YYYY HH:mm',
   TIME_ONLY: 'HH:mm:ss'
