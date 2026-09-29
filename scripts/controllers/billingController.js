@@ -1708,6 +1708,51 @@ const markInvoicePaid = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Mark invoice as sent without emailing it
+ * POST /api/billing/invoices/:id/mark-sent
+ */
+const markInvoiceSent = asyncHandler(async (req, res) => {
+  const invoiceId = req.params.id;
+
+  let invoiceQuery = 'SELECT id, status FROM invoices WHERE id = ?';
+  const invoiceParams = [invoiceId];
+
+  if (req.user.role === USER_ROLES.CONTRACTOR) {
+    invoiceQuery += ' AND created_by = ?';
+    invoiceParams.push(req.user.id);
+  }
+
+  const invoices = await executeQuery(invoiceQuery, invoiceParams);
+
+  if (invoices.length === 0) {
+    throw new NotFoundError('Invoice not found');
+  }
+
+  const invoice = invoices[0];
+
+  if (invoice.status === INVOICE_STATUS.PAID) {
+    throw new ConflictError('Cannot mark a paid invoice as sent');
+  }
+
+  if (invoice.status === INVOICE_STATUS.SENT) {
+    return res.json({
+      status: API_RESPONSE.SUCCESS,
+      message: 'Invoice already marked as sent'
+    });
+  }
+
+  await executeQuery(
+    'UPDATE invoices SET status = ?, updated_at = NOW() WHERE id = ?',
+    [INVOICE_STATUS.SENT, invoiceId]
+  );
+
+  res.json({
+    status: API_RESPONSE.SUCCESS,
+    message: 'Invoice marked as sent'
+  });
+});
+
+/**
  * List projects that have unbilled time entries
  * GET /api/billing/billable-projects
  */
@@ -1843,6 +1888,7 @@ module.exports = {
   exportBillingData,
   getBillingSummary,
   markInvoicePaid,
+  markInvoiceSent,
   getBillableProjects,
   generateInvoiceFromProject
 };

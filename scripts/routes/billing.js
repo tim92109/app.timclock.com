@@ -245,4 +245,14 @@ router.post('/invoices/:id/mark-paid',
   billingController.markInvoicePaid
 );
 
+/**
+ * @route   POST /api/billing/invoices/:id/mark-sent
+ * @desc    Mark invoice as sent without emailing it
+ * @access  Private (Admin, Manager, Contractor)
+ */
+router.post('/invoices/:id/mark-sent',
+  authorize(['admin', 'manager', 'contractor']),
+  billingController.markInvoiceSent
+);
+
 module.exports = router;

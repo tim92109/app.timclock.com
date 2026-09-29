@@ -108,15 +108,17 @@ const Billing = () => {
     },
   });
 
-  // Send invoice mutation
-  const sendInvoiceMutation = useMutation({
-    mutationFn: (id) => api.post(`/billing/invoices/${id}/send`),
+  // Mark invoice as sent mutation (sets status only; no email is sent)
+  const markSentMutation = useMutation({
+    mutationFn: (id) => api.post(`/billing/invoices/${id}/mark-sent`),
     onSuccess: () => {
-      toast.success(t('billing.toastSent'));
+      toast.success(t('billing.toastMarkedSent'));
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['billing-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['invoice'] });
     },
     onError: (error) => {
-      toast.error(error.response?.data?.message || t('billing.toastSendFailed'));
+      toast.error(error.response?.data?.message || t('billing.toastMarkSentFailed'));
     },
   });
 
@@ -127,6 +129,7 @@ const Billing = () => {
       toast.success(t('billing.toastPaid'));
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
       queryClient.invalidateQueries({ queryKey: ['billing-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['invoice'] });
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || t('billing.toastPaidFailed'));
@@ -195,9 +198,9 @@ const Billing = () => {
     );
   };
 
-  const handleSendInvoice = (id) => {
-    if (window.confirm(t('billing.confirmSend'))) {
-      sendInvoiceMutation.mutate(id);
+  const handleMarkSent = (id) => {
+    if (window.confirm(t('billing.confirmMarkSent'))) {
+      markSentMutation.mutate(id);
     }
   };
 
@@ -500,15 +503,15 @@ const Billing = () => {
                             
                             {invoice.status === 'draft' && (
                               <button
-                                onClick={() => handleSendInvoice(invoice.id)}
+                                onClick={() => handleMarkSent(invoice.id)}
                                 className="text-blue-600 hover:text-blue-900"
-                                title={t('billing.sendInvoice')}
+                                title={t('billing.markSent')}
                               >
                                 <Send className="w-4 h-4" />
                               </button>
                             )}
                             
-                            {(invoice.status === 'sent' || invoice.status === 'overdue') && (
+                            {invoice.status !== INVOICE_STATUSES.PAID && (
                               <button
                                 onClick={() => handleMarkPaid(invoice.id)}
                                 className="text-green-600 hover:text-green-900"
@@ -926,6 +929,26 @@ const Billing = () => {
             )}
 
             <div className="flex justify-end space-x-3 pt-4">
+              {invoiceDetail.invoice.status === INVOICE_STATUSES.DRAFT && (
+                <button
+                  type="button"
+                  onClick={() => handleMarkSent(invoiceDetail.invoice.id)}
+                  className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+                >
+                  <Send className="w-4 h-4 mr-2" />
+                  {t('billing.markSent')}
+                </button>
+              )}
+              {invoiceDetail.invoice.status !== INVOICE_STATUSES.PAID && (
+                <button
+                  type="button"
+                  onClick={() => handleMarkPaid(invoiceDetail.invoice.id)}
+                  className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium text-white bg-green-600 hover:bg-green-700"
+                >
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  {t('billing.markPaid')}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => downloadInvoice(viewInvoiceId)}
