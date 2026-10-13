@@ -64,6 +64,7 @@ const Login = () => {
                   required: t('auth.login.usernameRequired'),
                 })}
                 type="text"
+                maxLength={50}
                 autoComplete="username"
                 className={`input mt-1 ${errors.username ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : ''}`}
                 placeholder={t('auth.login.usernamePlaceholder')}
@@ -83,6 +84,7 @@ const Login = () => {
                     required: t('auth.login.passwordRequired'),
                   })}
                   type={showPassword ? 'text' : 'password'}
+                  maxLength={72}
                   autoComplete="current-password"
                   className={`input pr-10 ${errors.password ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : ''}`}
                   placeholder={t('auth.login.passwordPlaceholder')}

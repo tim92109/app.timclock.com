@@ -84,6 +84,7 @@ const Register = () => {
                     },
                   })}
                   type="text"
+                  maxLength={50}
                   autoComplete="given-name"
                   className={`input mt-1 ${errors.first_name ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : ''}`}
                   placeholder={t('auth.register.firstNamePlaceholder')}
@@ -106,6 +107,7 @@ const Register = () => {
                     },
                   })}
                   type="text"
+                  maxLength={50}
                   autoComplete="family-name"
                   className={`input mt-1 ${errors.last_name ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : ''}`}
                   placeholder={t('auth.register.lastNamePlaceholder')}
@@ -133,6 +135,7 @@ const Register = () => {
                   },
                 })}
                 type="text"
+                maxLength={50}
                 autoComplete="username"
                 className={`input mt-1 ${errors.username ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : ''}`}
                 placeholder={t('auth.register.usernamePlaceholder')}
@@ -152,6 +155,7 @@ const Register = () => {
                   validate: (value) => isValidEmail(value) || t('auth.register.emailInvalid'),
                 })}
                 type="email"
+                maxLength={100}
                 autoComplete="email"
                 className={`input mt-1 ${errors.email ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : ''}`}
                 placeholder={t('auth.register.emailPlaceholder')}
@@ -214,6 +218,7 @@ const Register = () => {
                     },
                   })}
                   type={showPassword ? 'text' : 'password'}
+                  maxLength={72}
                   autoComplete="new-password"
                   className={`input pr-10 ${errors.password ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : ''}`}
                   placeholder={t('auth.register.passwordPlaceholder')}
@@ -246,6 +251,7 @@ const Register = () => {
                     validate: (value) => value === password || t('auth.register.passwordMismatch'),
                   })}
                   type={showConfirmPassword ? 'text' : 'password'}
+                  maxLength={72}
                   autoComplete="new-password"
                   className={`input pr-10 ${errors.confirmPassword ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : ''}`}
                   placeholder={t('auth.register.confirmPlaceholder')}

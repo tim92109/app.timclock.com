@@ -18,10 +18,11 @@ const time = {
     'time.client': 'Client',
     'time.allProjects': 'All Projects',
     'time.allClients': 'All Clients',
+    'time.includeArchived': 'Include archived',
 
     'time.timeEntries': 'Time Entries',
     'time.date': 'Date',
-    'time.task': 'Task',
+    'time.task': 'Tasks',
     'time.duration': 'Duration',
     'time.actions': 'Actions',
 
@@ -37,6 +38,10 @@ const time = {
     'time.validationDescriptionRequired': 'Description is required',
     'time.validationStartTimeRequired': 'Start time is required',
     'time.validationEndTimeRequired': 'End time is required',
+    'time.runningEntryEndHint': 'This timer is still running. Leave the end time empty to keep it running.',
+    'time.modifyDescription': 'Modify description',
+    'time.saveDescription': 'Save',
+    'time.noDescription': 'No description yet',
 
     'time.confirmDelete': 'Are you sure you want to delete this time entry?',
     'time.loadError': 'Failed to load time entries',
@@ -78,10 +83,11 @@ const time = {
     'time.client': 'Cliente',
     'time.allProjects': 'Todos los proyectos',
     'time.allClients': 'Todos los clientes',
+    'time.includeArchived': 'Incluir archivados',
 
     'time.timeEntries': 'Entradas de tiempo',
     'time.date': 'Fecha',
-    'time.task': 'Tarea',
+    'time.task': 'Tareas',
     'time.duration': 'Duración',
     'time.actions': 'Acciones',
 
@@ -97,6 +103,10 @@ const time = {
     'time.validationDescriptionRequired': 'La descripción es obligatoria',
     'time.validationStartTimeRequired': 'La hora de inicio es obligatoria',
     'time.validationEndTimeRequired': 'La hora de fin es obligatoria',
+    'time.runningEntryEndHint': 'Este temporizador sigue activo. Deja la hora de fin vacía para mantenerlo en marcha.',
+    'time.modifyDescription': 'Modificar descripción',
+    'time.saveDescription': 'Guardar',
+    'time.noDescription': 'Aún no hay descripción',
 
     'time.confirmDelete': '¿Estás seguro de que deseas eliminar esta entrada de tiempo?',
     'time.loadError': 'No se pudieron cargar las entradas de tiempo',

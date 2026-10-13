@@ -566,7 +566,7 @@ const getClientProjects = asyncHandler(async (req, res) => {
   }
 
   // Build WHERE clause for projects
-  const whereConditions = ['p.client_id = ?', 'p.is_active = 1'];
+  const whereConditions = ['p.client_id = ?', 'p.is_active = 1', 'p.is_archived = 0'];
   const queryParams = [clientId];
 
   // Role-based filtering for employees
@@ -686,7 +686,7 @@ const getClientTime = asyncHandler(async (req, res) => {
     FROM time_entries te
     INNER JOIN projects p ON te.project_id = p.id
     INNER JOIN users u ON te.user_id = u.id
-    WHERE p.client_id = ?
+    WHERE p.client_id = ? AND te.is_archived = 0
     ORDER BY te.start_time DESC
     LIMIT ? OFFSET ?
   `;
@@ -698,7 +698,7 @@ const getClientTime = asyncHandler(async (req, res) => {
     SELECT COUNT(*) as total
     FROM time_entries te
     INNER JOIN projects p ON te.project_id = p.id
-    WHERE p.client_id = ?
+    WHERE p.client_id = ? AND te.is_archived = 0
   `;
   const countResult = await executeQuery(countQuery, [clientId]);
   const total = countResult[0].total;

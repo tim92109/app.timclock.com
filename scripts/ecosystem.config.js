@@ -42,8 +42,11 @@ module.exports = {
       error_file: './logs/error.log',
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
       
-      // Auto restart configuration
-      watch: true, // Set to true for development
+      // Auto restart configuration.
+      // Watching is enabled so uploading a source file triggers a reload.
+      // Requirement: dependencies must be installed (npm ci) on the host, or
+      // every reload crashes with "Cannot find module" and loops.
+      watch: true,
       ignore_watch: [
         'node_modules',
         'logs',
@@ -90,7 +93,7 @@ module.exports = {
       ref: 'origin/main',
       repo: 'git@github.com:your-username/timeclock-api.git',
       path: '/var/www/timeclock-api',
-      'post-deploy': 'npm install && npm run build && pm2 reload ecosystem.config.js --env production',
+      'post-deploy': 'npm install && npm run migrate && npm run build && pm2 reload ecosystem.config.js --env production',
       'pre-setup': 'apt update && apt install git -y'
     },
     
@@ -100,7 +103,7 @@ module.exports = {
       ref: 'origin/develop',
       repo: 'git@github.com:your-username/timeclock-api.git',
       path: '/var/www/timeclock-api-staging',
-      'post-deploy': 'npm install && pm2 reload ecosystem.config.js --env staging'
+      'post-deploy': 'npm install && npm run migrate && pm2 reload ecosystem.config.js --env staging'
     }
   }
 };

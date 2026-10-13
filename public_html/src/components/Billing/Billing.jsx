@@ -42,9 +42,9 @@ const Billing = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filters, setFilters] = useState({
     status: '',
-    clientId: '',
-    startDate: '',
-    endDate: '',
+    client_id: '',
+    start_date: '',
+    end_date: '',
   });
 
   // Fetch invoices
@@ -387,8 +387,8 @@ const Billing = () => {
           </div>
           <div>
             <select
-              value={filters.clientId}
-              onChange={(e) => setFilters({ ...filters, clientId: e.target.value })}
+              value={filters.client_id}
+              onChange={(e) => setFilters({ ...filters, client_id: e.target.value })}
               className="input"
             >
               <option value="">{t('billing.allClients')}</option>
@@ -402,8 +402,8 @@ const Billing = () => {
           <div>
             <input
               type="date"
-              value={filters.startDate}
-              onChange={(e) => setFilters({ ...filters, startDate: e.target.value })}
+              value={filters.start_date}
+              onChange={(e) => setFilters({ ...filters, start_date: e.target.value })}
               className="input"
               placeholder={t('billing.startDate')}
             />
@@ -501,7 +501,7 @@ const Billing = () => {
                               <Download className="w-4 h-4" />
                             </button>
                             
-                            {invoice.status === 'draft' && (
+                            {['draft', 'sent'].includes(invoice.status) && (
                               <button
                                 onClick={() => handleMarkSent(invoice.id)}
                                 className="text-blue-600 hover:text-blue-900"
@@ -693,6 +693,7 @@ const Billing = () => {
             <textarea
               {...register('description')}
               rows={3}
+              maxLength={2000}
               className="input"
               placeholder={t('billing.descriptionPlaceholder')}
             />
@@ -929,7 +930,7 @@ const Billing = () => {
             )}
 
             <div className="flex justify-end space-x-3 pt-4">
-              {invoiceDetail.invoice.status === INVOICE_STATUSES.DRAFT && (
+              {[INVOICE_STATUSES.DRAFT, INVOICE_STATUSES.SENT].includes(invoiceDetail.invoice.status) && (
                 <button
                   type="button"
                   onClick={() => handleMarkSent(invoiceDetail.invoice.id)}

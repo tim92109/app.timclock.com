@@ -39,8 +39,9 @@ const Projects = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filters, setFilters] = useState({
     status: '',
-    clientId: '',
+    client_id: '',
     priority: '',
+    include_archived: false,
   });
 
   // Fetch projects
@@ -226,7 +227,7 @@ const Projects = () => {
 
       {/* Search and Filters */}
       <div className="bg-white rounded-lg shadow p-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <div className="md:col-span-2">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
@@ -255,8 +256,22 @@ const Projects = () => {
           </div>
           <div>
             <select
-              value={filters.clientId}
-              onChange={(e) => setFilters({ ...filters, clientId: e.target.value })}
+              value={filters.priority}
+              onChange={(e) => setFilters({ ...filters, priority: e.target.value })}
+              className="input"
+            >
+              <option value="">{t('projects.allPriorities')}</option>
+              {Object.entries(PROJECT_PRIORITIES).map(([key, value]) => (
+                <option key={key} value={value}>
+                  {value.charAt(0).toUpperCase() + value.slice(1)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <select
+              value={filters.client_id}
+              onChange={(e) => setFilters({ ...filters, client_id: e.target.value })}
               className="input"
             >
               <option value="">{t('projects.allClients')}</option>
@@ -268,6 +283,15 @@ const Projects = () => {
             </select>
           </div>
         </div>
+        <label className="mt-4 inline-flex items-center text-sm text-gray-700">
+          <input
+            type="checkbox"
+            checked={filters.include_archived}
+            onChange={(e) => setFilters({ ...filters, include_archived: e.target.checked })}
+            className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+          <span className="ml-2">{t('projects.includeArchived')}</span>
+        </label>
       </div>
 
       {/* Projects Grid */}
@@ -299,6 +323,11 @@ const Projects = () => {
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${priorityConfig.bgColor} ${priorityConfig.textColor}`}>
                         {project.priority}
                       </span>
+                      {project.is_archived && (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-200 text-gray-700">
+                          {t('projects.archived')}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center space-x-1">
@@ -436,6 +465,7 @@ const Projects = () => {
             <input
               {...register('name', { required: t('projects.validation.nameRequired') })}
               type="text"
+              maxLength={100}
               className={`input ${errors.name ? 'border-red-300' : ''}`}
             />
             {errors.name && (
@@ -470,6 +500,7 @@ const Projects = () => {
             <textarea
               {...register('description')}
               rows={3}
+              maxLength={2000}
               className="input"
             />
           </div>
@@ -608,6 +639,7 @@ const Projects = () => {
             <input
               {...registerEdit('name', { required: t('projects.validation.nameRequired') })}
               type="text"
+              maxLength={100}
               className={`input ${editErrors.name ? 'border-red-300' : ''}`}
             />
             {editErrors.name && (
@@ -642,6 +674,7 @@ const Projects = () => {
             <textarea
               {...registerEdit('description')}
               rows={3}
+              maxLength={2000}
               className="input"
             />
           </div>

@@ -161,11 +161,16 @@ const loadAccessibleProject = async (projectId, req, columns = 'p.id') => {
  */
 const getProjects = asyncHandler(async (req, res) => {
   const { page, limit, offset } = parsePagination(req.query);
-  const { search, status, client_id, assigned_to } = req.query;
+  const { search, status, client_id, priority, assigned_to, include_archived } = req.query;
 
   // Build WHERE clause
   const whereConditions = ['p.is_active = 1'];
   const queryParams = [];
+
+  // Archived projects (settled/paid) are hidden unless explicitly requested.
+  if (include_archived !== 'true') {
+    whereConditions.push('p.is_archived = 0');
+  }
 
   // Role-based filtering
   if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role)) {
@@ -192,6 +197,11 @@ const getProjects = asyncHandler(async (req, res) => {
     queryParams.push(client_id);
   }
 
+  if (priority) {
+    whereConditions.push('p.priority = ?');
+    queryParams.push(priority);
+  }
+
   if (assigned_to && req.user.role !== USER_ROLES.EMPLOYEE) {
     whereConditions.push('p.assigned_to = ?');
     queryParams.push(assigned_to);
@@ -213,7 +223,7 @@ const getProjects = asyncHandler(async (req, res) => {
     SELECT p.id, p.name, p.description, p.status, p.priority,
            p.estimated_hours, p.actual_hours, p.hourly_rate, p.fixed_price,
            p.billing_type, p.start_date, p.due_date, p.completed_date,
-           p.created_at, p.updated_at,
+           p.is_archived, p.created_at, p.updated_at,
            c.id as client_id, c.name as client_name, c.company as client_company,
            u.id as assigned_user_id, u.first_name as assigned_first_name, 
            u.last_name as assigned_last_name,
@@ -249,6 +259,7 @@ const getProjects = asyncHandler(async (req, res) => {
     description: project.description,
     status: project.status,
     priority: project.priority,
+    is_archived: Boolean(project.is_archived),
     estimated_hours: parseFloat(project.estimated_hours) || 0,
     actual_hours: parseFloat(project.actual_hours) || 0,
     hourly_rate: parseFloat(project.hourly_rate) || null,
@@ -545,7 +556,7 @@ const updateProject = asyncHandler(async (req, res) => {
 
   // Check if project exists and user has access
   let existingQuery = `
-    SELECT id, status, assigned_to, created_by 
+    SELECT id, status, is_archived, assigned_to, created_by 
     FROM projects 
     WHERE id = ? AND is_active = 1
   `;
@@ -567,24 +578,23 @@ const updateProject = asyncHandler(async (req, res) => {
 
   const currentProject = existing[0];
 
-  // Handle status transitions
+  // Status is user-managed: any valid status may be set (the request validator
+  // already restricts the value to the projects.status enum), so no workflow
+  // transition is enforced. Keep the completion date in step with the status.
   if (updateData.status && updateData.status !== currentProject.status) {
-    const validTransitions = {
-      'open': ['active', 'cancelled'],
-      'active': ['complete', 'cancelled'],
-      'complete': ['invoice_sent'],
-      'invoice_sent': ['paid'],
-      'paid': [],
-      'cancelled': ['open']
-    };
-
-    if (!validTransitions[currentProject.status].includes(updateData.status)) {
-      throw new ValidationError(`Invalid status transition from ${currentProject.status} to ${updateData.status}`);
+    const reopeningStatuses = [PROJECT_STATUS.OPEN, PROJECT_STATUS.ACTIVE, PROJECT_STATUS.CANCELLED];
+    if (updateData.status === PROJECT_STATUS.COMPLETE) {
+      if (updateData.completed_date === undefined) {
+        updateData.completed_date = new Date().toISOString().split('T')[0];
+      }
+    } else if (currentProject.status === PROJECT_STATUS.COMPLETE && reopeningStatuses.includes(updateData.status)) {
+      updateData.completed_date = null;
     }
 
-    // Set completion date when marking as complete
-    if (updateData.status === 'complete') {
-      updateData.completed_date = new Date().toISOString().split('T')[0];
+    // Reopening a settled project brings it back into the active lists instead
+    // of leaving it archived and hidden.
+    if (currentProject.status === PROJECT_STATUS.PAID && updateData.status !== PROJECT_STATUS.PAID) {
+      updateData.is_archived = 0;
     }
   }
 
@@ -611,7 +621,7 @@ const updateProject = asyncHandler(async (req, res) => {
   const allowedFields = [
     'name', 'description', 'status', 'priority', 'estimated_hours',
     'hourly_rate', 'fixed_price', 'billing_type', 'start_date', 'due_date',
-    'completed_date', 'assigned_to', 'notes'
+    'completed_date', 'assigned_to', 'notes', 'is_archived'
   ];
 
   for (const [key, value] of Object.entries(updateData)) {

@@ -85,13 +85,75 @@ const settleInvoice = async (invoiceId, paidDate, options = {}) => {
     [invoiceId, totalAmount, paidDate, paymentMethod, notes, createdBy]
   );
 
-  // Reflect the payment on the related project. A NULL project_id matches no
-  // row, so invoices without a project are safely ignored.
+  // Reflect the payment on the related project and archive the settled work so
+  // paid projects and their time entries drop out of the active lists. A NULL
+  // project_id matches no row, so invoices without a project are safely ignored.
   await runQuery(`
     UPDATE projects
-    SET status = ?, payment_date = ?, updated_at = NOW()
+    SET status = ?, payment_date = ?, is_archived = 1, updated_at = NOW()
     WHERE id = (SELECT project_id FROM invoices WHERE id = ?)
   `, [PROJECT_STATUS.PAID, paidDate, invoiceId]);
+
+  await runQuery(`
+    UPDATE time_entries
+    SET is_archived = 1, updated_at = NOW()
+    WHERE project_id = (SELECT project_id FROM invoices WHERE id = ?)
+      AND is_archived = 0
+  `, [invoiceId]);
+};
+
+/**
+ * Apply the 'sent' side effects shared by the mark-sent and email paths.
+ *
+ * Marking an invoice sent reflects the state on the related project — status
+ * invoice_sent, an invoice_date stamp, archived so the billed work drops out
+ * of the active lists — and archives only the time entries billed on the
+ * invoice, leaving unbilled entries visible for the next invoice. Pass
+ * options.connection to run inside an existing transaction; otherwise the
+ * pool is used. Safe to re-run: both UPDATEs are idempotent.
+ *
+ * @param {number|string} invoiceId
+ * @param {Object} [options]
+ * @param {Object} [options.connection] - Transaction connection (optional)
+ */
+const applyInvoiceSentSideEffects = async (invoiceId, options = {}) => {
+  const { connection } = options;
+
+  const runQuery = async (query, params = []) => {
+    if (connection) {
+      const [rows] = await connection.execute(query, params);
+      return rows;
+    }
+    return executeQuery(query, params);
+  };
+
+  // Reflect the sent invoice on the related project. Never downgrade a paid
+  // or cancelled project; a NULL project_id matches no row, so invoices
+  // without a project are safely ignored.
+  await runQuery(`
+    UPDATE projects
+    SET status = ?,
+        invoice_date = COALESCE(invoice_date, (SELECT issue_date FROM invoices WHERE id = ?)),
+        is_archived = 1,
+        updated_at = NOW()
+    WHERE id = (SELECT project_id FROM invoices WHERE id = ?)
+      AND status NOT IN (?, ?)
+  `, [
+    PROJECT_STATUS.INVOICE_SENT,
+    invoiceId,
+    invoiceId,
+    PROJECT_STATUS.PAID,
+    PROJECT_STATUS.CANCELLED
+  ]);
+
+  // Archive the entries billed on this invoice, whether or not the create
+  // path stamped time_entries.invoice_id (invoice_items covers every item).
+  await runQuery(`
+    UPDATE time_entries te
+    INNER JOIN invoice_items ii ON ii.time_entry_id = te.id
+    SET te.is_archived = 1, te.updated_at = NOW()
+    WHERE ii.invoice_id = ? AND te.is_archived = 0
+  `, [invoiceId]);
 };
 
 /**
@@ -100,7 +162,7 @@ const settleInvoice = async (invoiceId, paidDate, options = {}) => {
  */
 const getInvoices = asyncHandler(async (req, res) => {
   const { page, limit, offset } = parsePagination(req.query);
-  const { status, client_id, start_date, end_date } = req.query;
+  const { status, client_id, start_date, end_date, search } = req.query;
 
   // Build WHERE clause
   const whereConditions = [];
@@ -138,6 +200,12 @@ const getInvoices = asyncHandler(async (req, res) => {
     queryParams.push(status);
   }
 
+  if (search) {
+    whereConditions.push('(i.invoice_number LIKE ? OR c.name LIKE ? OR c.company LIKE ?)');
+    const searchTerm = `%${search}%`;
+    queryParams.push(searchTerm, searchTerm, searchTerm);
+  }
+
   if (client_id) {
     whereConditions.push('i.client_id = ?');
     queryParams.push(client_id);
@@ -161,6 +229,7 @@ const getInvoices = asyncHandler(async (req, res) => {
   const countQuery = `
     SELECT COUNT(*) as total
     FROM invoices i
+    INNER JOIN clients c ON i.client_id = c.id
     ${whereClause}
   `;
   const countResult = await executeQuery(countQuery, queryParams);
@@ -923,9 +992,10 @@ const deleteInvoice = asyncHandler(async (req, res) => {
   }
 
   await executeTransaction(async (connection) => {
-    // Unmark time entries as invoiced
+    // Unmark and unarchive time entries so they reappear in the tracking
+    // lists and can be billed again
     await connection.execute(
-      'UPDATE time_entries SET invoiced = 0, invoice_id = NULL WHERE invoice_id = ?',
+      'UPDATE time_entries SET invoiced = 0, invoice_id = NULL, is_archived = 0 WHERE invoice_id = ?',
       [invoiceId]
     );
 
@@ -1227,6 +1297,11 @@ const sendInvoice = asyncHandler(async (req, res) => {
     'UPDATE invoices SET status = ?, updated_at = NOW() WHERE id = ?',
     [INVOICE_STATUS.SENT, invoiceId]
   );
+
+  // Reflect the sent state on the related project and archive the billed work.
+  await executeTransaction(async (connection) => {
+    await applyInvoiceSentSideEffects(invoiceId, { connection });
+  });
 
   res.json({
     status: API_RESPONSE.SUCCESS,
@@ -1734,21 +1809,23 @@ const markInvoiceSent = asyncHandler(async (req, res) => {
     throw new ConflictError('Cannot mark a paid invoice as sent');
   }
 
-  if (invoice.status === INVOICE_STATUS.SENT) {
-    return res.json({
-      status: API_RESPONSE.SUCCESS,
-      message: 'Invoice already marked as sent'
-    });
-  }
+  await executeTransaction(async (connection) => {
+    await connection.execute(
+      'UPDATE invoices SET status = ?, updated_at = NOW() WHERE id = ?',
+      [INVOICE_STATUS.SENT, invoiceId]
+    );
 
-  await executeQuery(
-    'UPDATE invoices SET status = ?, updated_at = NOW() WHERE id = ?',
-    [INVOICE_STATUS.SENT, invoiceId]
-  );
+    // Runs on every call so invoices marked sent before this behavior existed
+    // settle their project and entries when re-marked; the queries are
+    // idempotent, so repeat clicks are safe.
+    await applyInvoiceSentSideEffects(invoiceId, { connection });
+  });
 
   res.json({
     status: API_RESPONSE.SUCCESS,
-    message: 'Invoice marked as sent'
+    message: invoice.status === INVOICE_STATUS.SENT
+      ? 'Invoice already marked as sent'
+      : 'Invoice marked as sent'
   });
 });
 
@@ -1760,7 +1837,7 @@ const getBillableProjects = asyncHandler(async (req, res) => {
   const { client_id } = req.query;
   const { page, limit, offset } = parsePagination(req.query);
 
-  const whereConditions = ["p.status NOT IN ('paid', 'cancelled')"];
+  const whereConditions = ["p.status NOT IN ('paid', 'cancelled')", 'p.is_archived = 0'];
   const queryParams = [];
 
   if (client_id) {

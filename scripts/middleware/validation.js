@@ -273,15 +273,15 @@ const timeEntryValidations = {
       .withMessage('Task ID must be a positive integer'),
     body('description')
       .optional()
-      .isLength({ max: 1000 })
-      .withMessage('Description must be less than 1000 characters')
+      .isLength({ max: 2000})
+      .withMessage('Description must be less than 2000 characters')
   ],
   
   clockOut: [
     body('description')
       .optional()
-      .isLength({ max: 1000 })
-      .withMessage('Description must be less than 1000 characters')
+      .isLength({ max: 2000})
+      .withMessage('Description must be less than 2000 characters')
   ],
   
   create: [
@@ -296,8 +296,8 @@ const timeEntryValidations = {
       .withMessage('End time is required and must be in ISO 8601 format'),
     body('description')
       .optional()
-      .isLength({ max: 1000 })
-      .withMessage('Description must be less than 1000 characters'),
+      .isLength({ max: 2000})
+      .withMessage('Description must be less than 2000 characters'),
     body('hourly_rate')
       .optional()
       .isFloat({ min: 0 })
@@ -320,8 +320,8 @@ const timeEntryValidations = {
       .withMessage('End time must be in ISO 8601 format'),
     body('description')
       .optional()
-      .isLength({ max: 1000 })
-      .withMessage('Description must be less than 1000 characters'),
+      .isLength({ max: 2000})
+      .withMessage('Description must be less than 2000 characters'),
     body('billable')
       .optional()
       .isBoolean()

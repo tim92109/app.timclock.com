@@ -6,11 +6,13 @@ export const USER_ROLES = {
   EMPLOYEE: 'employee',
 };
 
-// Project statuses
+// Project statuses (must match the projects.status enum in the database)
 export const PROJECT_STATUSES = {
+  OPEN: 'open',
   ACTIVE: 'active',
-  ON_HOLD: 'on_hold',
-  COMPLETED: 'complete',
+  COMPLETE: 'complete',
+  INVOICE_SENT: 'invoice_sent',
+  PAID: 'paid',
   CANCELLED: 'cancelled',
 };
 
@@ -63,17 +65,25 @@ export const ROLE_CONFIG = {
 
 // Status configuration with colors
 export const STATUS_CONFIG = {
+  [PROJECT_STATUSES.OPEN]: {
+    bgColor: 'bg-gray-100',
+    textColor: 'text-gray-800',
+  },
   [PROJECT_STATUSES.ACTIVE]: {
     bgColor: 'bg-green-100',
     textColor: 'text-green-800',
   },
-  [PROJECT_STATUSES.ON_HOLD]: {
-    bgColor: 'bg-yellow-100',
-    textColor: 'text-yellow-800',
-  },
-  [PROJECT_STATUSES.COMPLETED]: {
+  [PROJECT_STATUSES.COMPLETE]: {
     bgColor: 'bg-blue-100',
     textColor: 'text-blue-800',
+  },
+  [PROJECT_STATUSES.INVOICE_SENT]: {
+    bgColor: 'bg-purple-100',
+    textColor: 'text-purple-800',
+  },
+  [PROJECT_STATUSES.PAID]: {
+    bgColor: 'bg-emerald-100',
+    textColor: 'text-emerald-800',
   },
   [PROJECT_STATUSES.CANCELLED]: {
     bgColor: 'bg-red-100',

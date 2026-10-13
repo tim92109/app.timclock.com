@@ -152,6 +152,7 @@ const Profile = () => {
                         },
                       })}
                       type="text"
+                      maxLength={50}
                       className={`input mt-1 ${profileErrors.first_name ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : ''}`}
                     />
                     {profileErrors.first_name && (
@@ -172,6 +173,7 @@ const Profile = () => {
                         },
                       })}
                       type="text"
+                      maxLength={50}
                       className={`input mt-1 ${profileErrors.last_name ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : ''}`}
                     />
                     {profileErrors.last_name && (
@@ -190,6 +192,7 @@ const Profile = () => {
                       validate: (value) => isValidEmail(value) || t('auth.profile.emailInvalid'),
                     })}
                     type="email"
+                    maxLength={100}
                     className={`input mt-1 ${profileErrors.email ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : ''}`}
                   />
                   {profileErrors.email && (
@@ -204,6 +207,7 @@ const Profile = () => {
                   <input
                     {...registerProfile('phone')}
                     type="tel"
+                    maxLength={20}
                     className={`input mt-1 ${profileErrors.phone ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : ''}`}
                     placeholder={t('auth.profile.phonePlaceholder')}
                   />
@@ -272,6 +276,7 @@ const Profile = () => {
                         required: t('auth.profile.currentPasswordRequired'),
                       })}
                       type={showCurrentPassword ? 'text' : 'password'}
+                      maxLength={72}
                       className={`input pr-10 ${passwordErrors.currentPassword ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : ''}`}
                     />
                     <button
@@ -305,6 +310,7 @@ const Profile = () => {
                         },
                       })}
                       type={showNewPassword ? 'text' : 'password'}
+                      maxLength={72}
                       className={`input pr-10 ${passwordErrors.newPassword ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : ''}`}
                     />
                     <button
@@ -334,6 +340,7 @@ const Profile = () => {
                       validate: (value) => value === newPassword || t('auth.profile.passwordMismatch'),
                     })}
                     type="password"
+                    maxLength={72}
                     className={`input mt-1 ${passwordErrors.confirmNewPassword ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : ''}`}
                   />
                   {passwordErrors.confirmNewPassword && (

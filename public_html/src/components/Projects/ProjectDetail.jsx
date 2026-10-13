@@ -528,6 +528,7 @@ const ProjectDetail = () => {
             <input
               {...register('title', { required: t('projects.task.titleRequired') })}
               type="text"
+              maxLength={100}
               className={`input ${errors.title ? 'border-red-300' : ''}`}
             />
             {errors.title && (
@@ -542,6 +543,7 @@ const ProjectDetail = () => {
             <textarea
               {...register('description')}
               rows={3}
+              maxLength={2000}
               className="input"
             />
           </div>

@@ -319,6 +319,7 @@ const Clients = () => {
             <input
               {...register('name', {                 required: t('clients.form.clientNameRequired') })}
               type="text"
+              maxLength={100}
               className={`input ${errors.name ? 'border-red-300' : ''}`}
             />
             {errors.name && (
@@ -335,6 +336,7 @@ const Clients = () => {
                 validate: (value) => !value || isValidEmail(value) || t('clients.form.emailInvalid'),
               })}
               type="email"
+              maxLength={100}
               className={`input ${errors.email ? 'border-red-300' : ''}`}
             />
             {errors.email && (
@@ -350,6 +352,7 @@ const Clients = () => {
               <input
                 {...register('phone')}
                 type="tel"
+                maxLength={20}
                 className="input"
               />
             </div>
@@ -361,6 +364,7 @@ const Clients = () => {
               <input
                 {...register('company')}
                 type="text"
+                maxLength={100}
                 className="input"
               />
             </div>
@@ -389,6 +393,7 @@ const Clients = () => {
             <textarea
               {...register('address')}
               rows={2}
+              maxLength={500}
               className="input"
             />
           </div>
@@ -400,6 +405,7 @@ const Clients = () => {
             <textarea
               {...register('notes')}
               rows={3}
+              maxLength={2000}
               className="input"
               placeholder={t('clients.form.notesPlaceholder')}
             />
@@ -442,6 +448,7 @@ const Clients = () => {
             <input
               {...registerEdit('name', {                 required: t('clients.form.clientNameRequired') })}
               type="text"
+              maxLength={100}
               className={`input ${editErrors.name ? 'border-red-300' : ''}`}
             />
             {editErrors.name && (
@@ -458,6 +465,7 @@ const Clients = () => {
                 validate: (value) => !value || isValidEmail(value) || t('clients.form.emailInvalid'),
               })}
               type="email"
+              maxLength={100}
               className={`input ${editErrors.email ? 'border-red-300' : ''}`}
             />
             {editErrors.email && (
@@ -473,6 +481,7 @@ const Clients = () => {
               <input
                 {...registerEdit('phone')}
                 type="tel"
+                maxLength={20}
                 className="input"
               />
             </div>
@@ -484,6 +493,7 @@ const Clients = () => {
               <input
                 {...registerEdit('company')}
                 type="text"
+                maxLength={100}
                 className="input"
               />
             </div>
@@ -511,6 +521,7 @@ const Clients = () => {
             <textarea
               {...registerEdit('address')}
               rows={2}
+              maxLength={500}
               className="input"
             />
           </div>
@@ -522,6 +533,7 @@ const Clients = () => {
             <textarea
               {...registerEdit('notes')}
               rows={3}
+              maxLength={2000}
               className="input"
               placeholder={t('clients.form.notesPlaceholder')}
             />

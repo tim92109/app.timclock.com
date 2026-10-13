@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS projects (
     assigned_to INT DEFAULT NULL,
     created_by INT NOT NULL,
     is_active BOOLEAN DEFAULT TRUE,
+    is_archived TINYINT(1) NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     
@@ -75,8 +76,10 @@ CREATE TABLE IF NOT EXISTS projects (
     INDEX idx_name (name),
     INDEX idx_client (client_id),
     INDEX idx_status (status),
+    INDEX idx_priority (priority),
     INDEX idx_assigned (assigned_to),
-    INDEX idx_active (is_active)
+    INDEX idx_active (is_active),
+    INDEX idx_projects_archived (is_archived)
 );
 
 -- Time entries table
@@ -94,6 +97,7 @@ CREATE TABLE IF NOT EXISTS time_entries (
     invoiced TINYINT(1) NOT NULL DEFAULT 0,
     invoice_id INT DEFAULT NULL,
     is_manual TINYINT(1) NOT NULL DEFAULT 0,
+    is_archived TINYINT(1) NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     
@@ -103,7 +107,8 @@ CREATE TABLE IF NOT EXISTS time_entries (
     INDEX idx_project (project_id),
     INDEX idx_start_time (start_time),
     INDEX idx_billable (billable),
-    INDEX idx_invoiced (invoiced)
+    INDEX idx_invoiced (invoiced),
+    INDEX idx_time_entries_archived (is_archived)
 );
 
 -- Invoices table

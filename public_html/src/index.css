@@ -149,6 +149,14 @@
   .loading-spinner {
     @apply animate-spin rounded-full border-2 border-gray-300 border-t-primary-600;
   }
+
+  .char-counter {
+    @apply block mt-0.5 text-right text-xs leading-4 text-gray-400 select-none;
+  }
+
+  .char-counter-low {
+    @apply text-amber-500;
+  }
   
   .status-open {
     @apply badge-gray;

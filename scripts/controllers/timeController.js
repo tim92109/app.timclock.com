@@ -111,7 +111,7 @@ const clockIn = asyncHandler(async (req, res) => {
     SELECT p.id, p.name, p.status, p.hourly_rate, c.hourly_rate as client_hourly_rate
     FROM projects p
     INNER JOIN clients c ON p.client_id = c.id
-    WHERE p.id = ? AND p.is_active = 1
+    WHERE p.id = ? AND p.is_active = 1 AND p.is_archived = 0
   `;
   const projectParams = [project_id];
 
@@ -295,12 +295,18 @@ const getTimeEntries = asyncHandler(async (req, res) => {
     project_id, 
     client_id, 
     user_id, 
-    billable 
+    billable,
+    include_archived
   } = req.query;
 
   // Build WHERE clause
   const whereConditions = [];
   const queryParams = [];
+
+  // Archived entries (settled/paid) are hidden unless explicitly requested.
+  if (include_archived !== 'true') {
+    whereConditions.push('te.is_archived = 0');
+  }
 
   // Role-based filtering
   if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role)) {
@@ -452,7 +458,7 @@ const createTimeEntry = asyncHandler(async (req, res) => {
     SELECT p.id, p.name, p.status, p.hourly_rate, c.hourly_rate as client_hourly_rate
     FROM projects p
     INNER JOIN clients c ON p.client_id = c.id
-    WHERE p.id = ? AND p.is_active = 1
+    WHERE p.id = ? AND p.is_active = 1 AND p.is_archived = 0
   `;
   const projectParams = [project_id];
 
@@ -616,16 +622,38 @@ const updateTimeEntry = asyncHandler(async (req, res) => {
     updateValues.push(description);
   }
 
-  if (start_time && end_time) {
-    const startAt = new Date(start_time);
-    const endAt = new Date(end_time);
-    const timeValidation = validateTimeRange(startAt, endAt);
+  // Accept either timestamp independently. A running entry has no end_time, so
+  // its start_time (and description) must be editable without supplying an end.
+  const hasStart = start_time !== undefined && start_time !== null && start_time !== '';
+  const hasEnd = end_time !== undefined && end_time !== null && end_time !== '';
+  const startAt = hasStart ? new Date(start_time) : null;
+  const endAt = hasEnd ? new Date(end_time) : null;
+
+  if (startAt) {
+    updateFields.push('start_time = ?');
+    updateValues.push(startAt);
+  }
+
+  if (endAt) {
+    updateFields.push('end_time = ?');
+    updateValues.push(endAt);
+  }
+
+  // Recompute the duration whenever a complete range exists, falling back to
+  // the stored timestamp for whichever side was not supplied. A running entry
+  // keeps a null duration until it is clocked out.
+  const effectiveStart = startAt || (entry.start_time ? new Date(entry.start_time) : null);
+  const effectiveEnd = endAt || (entry.end_time ? new Date(entry.end_time) : null);
+  const recomputedDuration = Boolean(effectiveStart && effectiveEnd);
+
+  if (recomputedDuration) {
+    const timeValidation = validateTimeRange(effectiveStart, effectiveEnd);
     if (!timeValidation.isValid) {
       throw new ValidationError(timeValidation.error);
     }
 
-    updateFields.push('start_time = ?', 'end_time = ?', 'duration_minutes = ?');
-    updateValues.push(startAt, endAt, timeValidation.duration);
+    updateFields.push('duration_minutes = ?');
+    updateValues.push(timeValidation.duration);
   }
 
   if (billable !== undefined) {
@@ -648,8 +676,8 @@ const updateTimeEntry = asyncHandler(async (req, res) => {
 
   await executeQuery(updateQuery, updateValues);
 
-  // Update project actual hours if duration changed
-  if (start_time && end_time) {
+  // Update project actual hours when a duration was recomputed.
+  if (recomputedDuration) {
     await executeQuery(`
       UPDATE projects 
       SET actual_hours = (
@@ -1107,7 +1135,7 @@ const createBulkTimeEntries = asyncHandler(async (req, res) => {
       if (isProjectScoped) {
         const accessQuery = `
           SELECT p.id FROM projects p
-          WHERE p.id = ? AND p.is_active = 1 AND ${employeeProjectAccess('p')}
+          WHERE p.id = ? AND p.is_active = 1 AND p.is_archived = 0 AND ${employeeProjectAccess('p')}
         `;
         const access = await executeQuery(accessQuery, [
           project_id,
@@ -1349,12 +1377,18 @@ const exportTimeEntries = asyncHandler(async (req, res) => {
     project_id, 
     client_id, 
     user_id, 
-    billable 
+    billable,
+    include_archived
   } = req.query;
 
   // Build WHERE clause
   const whereConditions = [];
   const queryParams = [];
+
+  // Archived entries (settled/paid) are hidden unless explicitly requested.
+  if (include_archived !== 'true') {
+    whereConditions.push('te.is_archived = 0');
+  }
 
   // Role-based filtering
   if ([USER_ROLES.EMPLOYEE, USER_ROLES.CONTRACTOR].includes(req.user.role)) {
