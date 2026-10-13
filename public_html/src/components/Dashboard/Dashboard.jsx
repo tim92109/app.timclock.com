@@ -70,7 +70,7 @@ const Dashboard = () => {
   const getElapsedTime = () => {
     if (!activeTimeEntry?.start_time) return 0;
     const startTime = new Date(activeTimeEntry.start_time);
-    return Math.floor((currentTime - startTime) / 1000);
+    return Math.max(0, Math.floor((currentTime - startTime) / 1000));
   };
 
   const elapsedSeconds = getElapsedTime();

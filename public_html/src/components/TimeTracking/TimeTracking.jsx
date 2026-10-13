@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { 
@@ -35,11 +35,14 @@ const TimeTracking = () => {
   const [showStartModal, setShowStartModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingEntry, setEditingEntry] = useState(null);
+  const [isEditingActiveDescription, setIsEditingActiveDescription] = useState(false);
+  const [activeDescriptionDraft, setActiveDescriptionDraft] = useState('');
   const [filters, setFilters] = useState({
-    startDate: '',
-    endDate: '',
-    projectId: '',
-    clientId: '',
+    start_date: '',
+    end_date: '',
+    project_id: '',
+    client_id: '',
+    include_archived: false,
   });
 
   const canManage = [USER_ROLES.ADMIN, USER_ROLES.MANAGER, USER_ROLES.CONTRACTOR].includes(user?.role);
@@ -59,6 +62,18 @@ const TimeTracking = () => {
     queryFn: () => api.get('/time/active').then(res => res.data.active_entry),
     refetchInterval: 30000,
   });
+
+  // Keep the inline description editor in sync with the running entry. Keyed on
+  // the entry id so a background refetch does not discard in-progress typing.
+  const activeEntryIdRef = useRef(null);
+  useEffect(() => {
+    const id = activeTimeEntry?.id ?? null;
+    if (activeEntryIdRef.current !== id) {
+      activeEntryIdRef.current = id;
+      setActiveDescriptionDraft(activeTimeEntry?.description || '');
+      setIsEditingActiveDescription(false);
+    }
+  }, [activeTimeEntry?.id, activeTimeEntry?.description]);
 
   // Fetch time entries
   const { data: timeEntries, isLoading, error } = useQuery({
@@ -86,7 +101,7 @@ const TimeTracking = () => {
 
   // Stop timer mutation
   const stopTimerMutation = useMutation({
-    mutationFn: () => api.post('/time/clock-out'),
+    mutationFn: (payload) => api.post('/time/clock-out', payload),
     onSuccess: () => {
       toast.success(t('time.toastTimerStopped'));
       refetchActiveEntry();
@@ -132,9 +147,24 @@ const TimeTracking = () => {
     onSuccess: () => {
       toast.success(t('time.toastEntryUpdated'));
       queryClient.invalidateQueries({ queryKey: ['time-entries'] });
+      queryClient.invalidateQueries({ queryKey: ['active-time-entry'] });
       setShowEditModal(false);
       setEditingEntry(null);
       resetEdit();
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || t('time.toastUpdateFailed'));
+    },
+  });
+
+  // Update only the running entry's description while the timer is active
+  const updateActiveDescriptionMutation = useMutation({
+    mutationFn: ({ id, description }) => api.put(`/time/${id}`, { description }),
+    onSuccess: () => {
+      toast.success(t('time.toastEntryUpdated'));
+      queryClient.invalidateQueries({ queryKey: ['time-entries'] });
+      queryClient.invalidateQueries({ queryKey: ['active-time-entry'] });
+      setIsEditingActiveDescription(false);
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || t('time.toastUpdateFailed'));
@@ -177,13 +207,29 @@ const TimeTracking = () => {
   const getElapsedTime = () => {
     if (!activeTimeEntry?.start_time) return 0;
     const startTime = new Date(activeTimeEntry.start_time);
-    return Math.floor((currentTime - startTime) / 1000);
+    return Math.max(0, Math.floor((currentTime - startTime) / 1000));
   };
 
   const elapsedSeconds = getElapsedTime();
 
   const handleStopTimer = () => {
-    stopTimerMutation.mutate();
+    const payload = isEditingActiveDescription
+      ? { description: activeDescriptionDraft.trim() }
+      : {};
+    stopTimerMutation.mutate(payload);
+  };
+
+  const handleSaveActiveDescription = () => {
+    if (!activeTimeEntry) return;
+    updateActiveDescriptionMutation.mutate({
+      id: activeTimeEntry.id,
+      description: activeDescriptionDraft.trim(),
+    });
+  };
+
+  const handleCancelActiveDescription = () => {
+    setActiveDescriptionDraft(activeTimeEntry?.description || '');
+    setIsEditingActiveDescription(false);
   };
 
   const handleAddTimeEntry = (data) => {
@@ -202,12 +248,15 @@ const TimeTracking = () => {
   };
 
   const handleEditTimeEntry = (data) => {
+    const startTime = toIsoTimestamp(data.start_time);
+    const endTime = toIsoTimestamp(data.end_time);
     updateTimeEntryMutation.mutate({
       id: editingEntry.id,
       data: {
         ...data,
-        start_time: toIsoTimestamp(data.start_time),
-        end_time: toIsoTimestamp(data.end_time),
+        start_time: startTime,
+        // Omit an empty end time so a running entry stays running.
+        ...(endTime ? { end_time: endTime } : {}),
       },
     });
   };
@@ -282,21 +331,68 @@ const TimeTracking = () => {
         
         {activeTimeEntry ? (
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-4 flex-1 min-w-0">
               <div className="p-3 bg-primary-100 rounded-full">
                 <Clock className="w-6 h-6 text-primary-600" />
               </div>
-              <div>
+              <div className="flex-1 min-w-0">
                 <h3 className="text-lg font-medium text-gray-900">
                   {activeTimeEntry.project_name}
                 </h3>
-                <p className="text-gray-600">{activeTimeEntry.description}</p>
-                <p className="text-sm text-gray-500">
+                {isEditingActiveDescription ? (
+                  <div className="mt-1 max-w-xl">
+                    <textarea
+                      value={activeDescriptionDraft}
+                      onChange={(e) => setActiveDescriptionDraft(e.target.value)}
+                      rows={2}
+                      maxLength={2000}
+                      autoFocus
+                      placeholder={t('time.startTimerDescription')}
+                      className="input"
+                    />
+                    <div className="mt-2 flex space-x-2">
+                      <button
+                        type="button"
+                        onClick={handleSaveActiveDescription}
+                        disabled={updateActiveDescriptionMutation.isPending}
+                        className="btn-primary btn-sm flex items-center"
+                      >
+                        {updateActiveDescriptionMutation.isPending ? (
+                          <LoadingSpinner size="sm" color="white" />
+                        ) : (
+                          t('time.saveDescription')
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCancelActiveDescription}
+                        className="btn-outline btn-sm"
+                      >
+                        {t('time.cancel')}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-start space-x-2">
+                    <p className="text-gray-600">
+                      {activeTimeEntry.description || t('time.noDescription')}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingActiveDescription(true)}
+                      title={t('time.modifyDescription')}
+                      className="text-primary-600 hover:text-primary-900 flex-shrink-0"
+                    >
+                      <Edit className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+                <p className="text-sm text-gray-500 mt-1">
                   {t('time.startedAt')} {formatDateTime(activeTimeEntry.start_time, 'h:mm a')}
                 </p>
               </div>
             </div>
-            <div className="text-right">
+            <div className="text-right flex-shrink-0">
               <div className="text-3xl font-mono font-bold text-gray-900">
                 {formatTimer(elapsedSeconds)}
               </div>
@@ -341,8 +437,8 @@ const TimeTracking = () => {
             </label>
             <input
               type="date"
-              value={filters.startDate}
-              onChange={(e) => setFilters({ ...filters, startDate: e.target.value })}
+              value={filters.start_date}
+              onChange={(e) => setFilters({ ...filters, start_date: e.target.value })}
               className="input"
             />
           </div>
@@ -352,8 +448,8 @@ const TimeTracking = () => {
             </label>
             <input
               type="date"
-              value={filters.endDate}
-              onChange={(e) => setFilters({ ...filters, endDate: e.target.value })}
+              value={filters.end_date}
+              onChange={(e) => setFilters({ ...filters, end_date: e.target.value })}
               className="input"
             />
           </div>
@@ -362,8 +458,8 @@ const TimeTracking = () => {
               {t('time.project')}
             </label>
             <select
-              value={filters.projectId}
-              onChange={(e) => setFilters({ ...filters, projectId: e.target.value })}
+              value={filters.project_id}
+              onChange={(e) => setFilters({ ...filters, project_id: e.target.value })}
               className="input"
             >
               <option value="">{t('time.allProjects')}</option>
@@ -379,8 +475,8 @@ const TimeTracking = () => {
               {t('time.client')}
             </label>
             <select
-              value={filters.clientId}
-              onChange={(e) => setFilters({ ...filters, clientId: e.target.value })}
+              value={filters.client_id}
+              onChange={(e) => setFilters({ ...filters, client_id: e.target.value })}
               className="input"
             >
               <option value="">{t('time.allClients')}</option>
@@ -392,6 +488,15 @@ const TimeTracking = () => {
             </select>
           </div>
         </div>
+        <label className="mt-4 inline-flex items-center text-sm text-gray-700">
+          <input
+            type="checkbox"
+            checked={filters.include_archived}
+            onChange={(e) => setFilters({ ...filters, include_archived: e.target.checked })}
+            className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+          <span className="ml-2">{t('time.includeArchived')}</span>
+        </label>
       </div>
 
       {/* Time Entries Table */}
@@ -497,6 +602,7 @@ const TimeTracking = () => {
             <textarea
               {...registerStart('description')}
               rows={3}
+              maxLength={2000}
               className="input"
             />
           </div>
@@ -562,6 +668,7 @@ const TimeTracking = () => {
             <textarea
               {...register('description', { required: t('time.validationDescriptionRequired') })}
               rows={3}
+              maxLength={2000}
               className={`input ${errors.description ? 'border-red-300' : ''}`}
             />
             {errors.description && (
@@ -656,6 +763,7 @@ const TimeTracking = () => {
             <textarea
               {...registerEdit('description', { required: t('time.validationDescriptionRequired') })}
               rows={3}
+              maxLength={2000}
               className={`input ${editErrors.description ? 'border-red-300' : ''}`}
             />
             {editErrors.description && (
@@ -683,12 +791,17 @@ const TimeTracking = () => {
                 {t('time.endTime')}
               </label>
               <input
-                {...registerEdit('end_time', { required: t('time.validationEndTimeRequired') })}
+                {...registerEdit('end_time', {
+                  required: editingEntry?.end_time ? t('time.validationEndTimeRequired') : false,
+                })}
                 type="datetime-local"
                 className={`input ${editErrors.end_time ? 'border-red-300' : ''}`}
               />
               {editErrors.end_time && (
                 <p className="mt-1 text-sm text-red-600">{editErrors.end_time.message}</p>
+              )}
+              {!editingEntry?.end_time && (
+                <p className="mt-1 text-xs text-gray-500">{t('time.runningEntryEndHint')}</p>
               )}
             </div>
           </div>

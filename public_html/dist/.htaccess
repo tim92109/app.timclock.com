@@ -1,0 +1,21 @@
+# Force correct MIME types for module scripts and styles
+AddType application/javascript .js
+AddType application/javascript .mjs
+AddType text/css .css
+AddType image/svg+xml .svg
+
+# Enable rewrite engine
+RewriteEngine On
+
+# Proxy API requests to Node.js server on port 3000
+RewriteRule ^api/(.*)$ http://localhost:3000/api/$1 [P,L]
+
+# Handle React Router (SPA) - serve index.html for non-API routes
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_URI} !^/api/
+RewriteRule . /index.html [L]
+
+# Security headers
+Header always set X-Content-Type-Options nosniff
+Header always set X-Frame-Options DENY
